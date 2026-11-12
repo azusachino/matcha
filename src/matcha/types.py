@@ -141,9 +141,10 @@ class MediaInfo:
 class TrackKind(StrEnum):
     """What a sidecar file is. Conversion to a playable format stays in the bot.
 
-    A kind belongs here once a parser under ``platforms/`` produces it. Vocabulary that
-    nothing produces is listed in :data:`RESERVED_TRACK_KINDS` instead, so a bot cannot
-    write a branch for a track that never arrives.
+    A kind belongs here once a parser under ``platforms/`` produces it; vocabulary that
+    nothing produces yet is listed in :data:`RESERVED_TRACK_KINDS`. That list documents
+    intent -- it is not enforced, so a branch on a reserved kind still type-checks and
+    runs. Check it before relying on a kind arriving.
     """
 
     SUBTITLE = "subtitle"
@@ -152,12 +153,13 @@ class TrackKind(StrEnum):
     THUMBNAIL = "thumbnail"
 
 
-#: Kinds no parser produces yet. They stay in the enum so consumers that already name
-#: them keep importing, but nothing guarantees a track of this kind will arrive.
-#: ``CHAPTERS`` is reserved because chapter markers arrive inline in a player body, not
-#: as a downloadable sidecar URL. ``THUMBNAIL`` is reserved because a work's cover already
-#: has exactly one home, :attr:`MediaInfo.thumbnail_url`; the kind would only name a
-#: cover *sidecar* file, which no parser describes.
+#: Kinds no parser produces yet: **documentary, not enforced**. The members still exist
+#: and still construct, so nothing fails if a bot branches on one; this list only separates
+#: committed vocabulary from planned vocabulary, and a test guards that the parsers stay
+#: out of it. ``CHAPTERS`` is reserved because chapter markers arrive inline in a player
+#: body, not as a downloadable sidecar URL. ``THUMBNAIL`` is reserved because a work's
+#: cover already has exactly one home, :attr:`MediaInfo.thumbnail_url`; the kind would only
+#: name a cover *sidecar* file, which no parser describes.
 RESERVED_TRACK_KINDS: frozenset[TrackKind] = frozenset({TrackKind.CHAPTERS, TrackKind.THUMBNAIL})
 
 
