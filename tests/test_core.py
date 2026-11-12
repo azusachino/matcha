@@ -22,7 +22,7 @@ from matcha import (
     decide,
     parse,
 )
-from matcha.chain import ChainFailed, Probe, ProbeLike, is_complete, run_chain
+from matcha.chain import ChainFailed, Expectation, Probe, ProbeLike, is_complete, run_chain
 from matcha.errors import NeedsExpansionError
 from matcha.link import with_expanded
 
@@ -267,6 +267,23 @@ def test_completeness_expectation_is_injectable():
     metadata = _NamedProbe(200, None, parsed=True, named=True)
     assert is_complete(metadata, None, expectation=expectation)
     assert not is_complete(Probe(200), None)
+
+
+def test_expectation_alias_binds_to_the_callers_probe():
+    """Typed, not Any: a richer probe's expectation is expressible and is accepted.
+
+    The old ``Callable[[ProbeLike], bool]`` alias made this assignment a type error while
+    the runtime happily called it -- which is how the mismatch stayed invisible.
+    """
+
+    def names_the_work(probe: _NamedProbe) -> bool:
+        return probe.parsed and probe.named
+
+    expectation: Expectation[_NamedProbe] = names_the_work
+    named = _NamedProbe(5_000_000, 108.0, parsed=True, named=True)
+    unnamed = _NamedProbe(5_000_000, 108.0, parsed=True, named=False)
+    assert is_complete(named, 109, expectation=expectation)
+    assert not is_complete(unnamed, 109, expectation=expectation)
 
 
 def test_chain_uses_an_injected_expectation():

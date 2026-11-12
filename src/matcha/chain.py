@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from .types import Attempt, ChainResult, Failure, File, Outcome, Reason, Unavailable
 
@@ -19,11 +19,16 @@ class ProbeLike(Protocol):
 
     Bots may pass their own richer probe (for example one that also records whether the
     file parses and yields a name) as long as it keeps these two fields; an injected
-    ``expectation`` can then read the extra fields.
+    ``expectation`` can then read the extra fields. The members are read-only properties
+    on purpose: a frozen dataclass probe has read-only fields, and a writable-attribute
+    protocol would reject it while the runtime accepted it.
     """
 
-    size_bytes: int
-    duration_s: float | None
+    @property
+    def size_bytes(self) -> int: ...
+
+    @property
+    def duration_s(self) -> float | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +39,19 @@ class Probe:
     duration_s: float | None = None
 
 
-Expectation = Callable[[ProbeLike], bool]
+#: Bound once on both sides of ``is_complete``/``run_chain`` so an expectation written
+#: for a bot's richer probe stays assignable (see :data:`Expectation`).
+P = TypeVar("P", bound=ProbeLike)
+
+
+#: A question about the probe the caller actually produced. A
+#: ``Callable[[ProbeLike], bool]`` alias would reject the very expectations the
+#: ``is_complete`` docstring advertises: a bot's probe carries more fields, so
+#: ``Callable[[_NamedProbe], bool]`` is contravariantly incompatible with a narrower
+#: parameter. One TypeVar bound on both the probe and the expectation keeps the
+#: annotation honest -- the expectation is only ever called with the probe the same call
+#: produced.
+Expectation = Callable[[P], bool]
 
 
 class Engine(Protocol):
@@ -66,11 +83,11 @@ class ChainFailed(Exception):
 
 
 def is_complete(
-    probe: ProbeLike,
+    probe: P,
     expected_duration_s: float | None,
     *,
     tolerance: float = 0.25,
-    expectation: Expectation | None = None,
+    expectation: Expectation[P] | None = None,
 ) -> bool:
     """A file is complete when it exists, is not a stub, and meets the expectation.
 
@@ -93,9 +110,9 @@ def is_complete(
 def run_chain(
     engines: Iterable[Engine],
     *,
-    probe: Callable[[str], ProbeLike] | None = None,
+    probe: Callable[[str], P] | None = None,
     expected_duration_s: float | None = None,
-    expectation: Expectation | None = None,
+    expectation: Expectation[P] | None = None,
     log: Callable[[Attempt], None] | None = None,
 ) -> ChainResult:
     """Try engines in order; the first complete result wins, every attempt is kept."""
