@@ -1,0 +1,97 @@
+"""Running ordered engines, and knowing when a file is actually finished.
+
+The chain is shared by *resolution* and *fetching*. A single engine for one stage and
+several for another is how a bot ends up losing links that it could still have saved:
+suzuran resolved with yt-dlp alone while downloading with yt-dlp and yutto.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Protocol
+
+from .types import Attempt, ChainResult, Failure, File, Outcome, Reason, Unavailable
+
+
+@dataclass(frozen=True, slots=True)
+class Probe:
+    """What a produced file actually is, so a truncated success can be rejected."""
+
+    size_bytes: int
+    duration_s: float | None = None
+
+
+class Engine(Protocol):
+    """One way to obtain the media. The id and version are logged on every attempt."""
+
+    id: str
+
+    def version(self) -> str: ...
+
+    def attempt(self) -> Outcome: ...
+
+
+class ChainFailed(Exception):
+    """No engine produced a complete file; ``attempts`` says what each one said."""
+
+    def __init__(self, attempts: tuple[Attempt, ...]) -> None:
+        self.attempts = attempts
+        reasons = ", ".join(
+            f"{a.engine}:{getattr(a.outcome, 'reason', 'unavailable')}" for a in attempts
+        )
+        super().__init__(f"every engine failed ({reasons})")
+
+    @property
+    def reason(self) -> Reason:
+        for attempt in reversed(self.attempts):
+            if isinstance(attempt.outcome, Failure):
+                return attempt.outcome.reason
+        return Reason.EXTRACTOR_FAILED
+
+
+def is_complete(
+    probe: Probe, expected_duration_s: float | None, *, tolerance: float = 0.25
+) -> bool:
+    """A file is complete when it exists, is not a stub, and matches the known duration."""
+    if probe.size_bytes <= 1024:
+        return False
+    if expected_duration_s and probe.duration_s:
+        return probe.duration_s >= expected_duration_s * (1 - tolerance)
+    return True
+
+
+def run_chain(
+    engines: Iterable[Engine],
+    *,
+    probe: Callable[[str], Probe] | None = None,
+    expected_duration_s: float | None = None,
+    log: Callable[[Attempt], None] | None = None,
+) -> ChainResult:
+    """Try engines in order; the first complete result wins, every attempt is kept."""
+    attempts: list[Attempt] = []
+    for engine in engines:
+        version = engine.version()
+        outcome = engine.attempt()
+        attempt = Attempt(engine.id, version, outcome)
+        attempts.append(attempt)
+        if log is not None:
+            log(attempt)
+        if isinstance(outcome, File):
+            if probe is not None and not is_complete(probe(outcome.path), expected_duration_s):
+                continue
+            return ChainResult(outcome.path, engine.id, tuple(attempts))
+    raise ChainFailed(tuple(attempts))
+
+
+def fresh_chain(*, out_dir: str, engines: Iterable[Engine]) -> Callable[[], ChainResult]:
+    """Bind a chain to one output directory, so callers cannot forget it."""
+
+    def run() -> ChainResult:
+        return run_chain(engines)
+
+    run.out_dir = out_dir  # type: ignore[attr-defined]
+    return run
+
+
+__all__ = ["ChainFailed", "Engine", "Probe", "Unavailable", "is_complete", "run_chain"]
