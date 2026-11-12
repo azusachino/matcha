@@ -14,12 +14,27 @@ from typing import Protocol
 from .types import Attempt, ChainResult, Failure, File, Outcome, Reason, Unavailable
 
 
+class ProbeLike(Protocol):
+    """What completeness needs: a byte size and, when known, a duration.
+
+    Bots may pass their own richer probe (for example one that also records whether the
+    file parses and yields a name) as long as it keeps these two fields; an injected
+    ``expectation`` can then read the extra fields.
+    """
+
+    size_bytes: int
+    duration_s: float | None
+
+
 @dataclass(frozen=True, slots=True)
 class Probe:
     """What a produced file actually is, so a truncated success can be rejected."""
 
     size_bytes: int
     duration_s: float | None = None
+
+
+Expectation = Callable[[ProbeLike], bool]
 
 
 class Engine(Protocol):
@@ -51,9 +66,23 @@ class ChainFailed(Exception):
 
 
 def is_complete(
-    probe: Probe, expected_duration_s: float | None, *, tolerance: float = 0.25
+    probe: ProbeLike,
+    expected_duration_s: float | None,
+    *,
+    tolerance: float = 0.25,
+    expectation: Expectation | None = None,
 ) -> bool:
-    """A file is complete when it exists, is not a stub, and matches the known duration."""
+    """A file is complete when it exists, is not a stub, and meets the expectation.
+
+    The default expectation is the published duration: a stream that stopped early is a
+    failure, not a success, and a file at or below the 1024-byte floor is a stub. A bot
+    with a better question ("does it parse and name the work?") passes its own
+    ``expectation``; it then owns the whole verdict, including size, so a small but
+    valid metadata document is not rejected by a media-file floor. Callers that pass no
+    expectation keep the default shape and behavior exactly.
+    """
+    if expectation is not None:
+        return bool(expectation(probe))
     if probe.size_bytes <= 1024:
         return False
     if expected_duration_s and probe.duration_s:
@@ -64,8 +93,9 @@ def is_complete(
 def run_chain(
     engines: Iterable[Engine],
     *,
-    probe: Callable[[str], Probe] | None = None,
+    probe: Callable[[str], ProbeLike] | None = None,
     expected_duration_s: float | None = None,
+    expectation: Expectation | None = None,
     log: Callable[[Attempt], None] | None = None,
 ) -> ChainResult:
     """Try engines in order; the first complete result wins, every attempt is kept."""
@@ -78,7 +108,11 @@ def run_chain(
         if log is not None:
             log(attempt)
         if isinstance(outcome, File):
-            if probe is not None and not is_complete(probe(outcome.path), expected_duration_s):
+            if probe is not None and not is_complete(
+                probe(outcome.path),
+                expected_duration_s,
+                expectation=expectation,
+            ):
                 continue
             return ChainResult(outcome.path, engine.id, tuple(attempts))
     raise ChainFailed(tuple(attempts))
@@ -94,4 +128,13 @@ def fresh_chain(*, out_dir: str, engines: Iterable[Engine]) -> Callable[[], Chai
     return run
 
 
-__all__ = ["ChainFailed", "Engine", "Probe", "Unavailable", "is_complete", "run_chain"]
+__all__ = [
+    "ChainFailed",
+    "Engine",
+    "Expectation",
+    "Probe",
+    "ProbeLike",
+    "Unavailable",
+    "is_complete",
+    "run_chain",
+]

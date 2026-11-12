@@ -15,8 +15,10 @@ and yt-dlp's argv. Both were the same missing abstraction: nothing owned the que
 | Module | Owns | Leaves to the bot |
 | --- | --- | --- |
 | `link` | `WorkRef`, parsing, the single `canonical_url` producer | nothing |
-| `platforms/bilibili` | request descriptions (`view`, `playurl`, visitor cookies), payload parsers | performing requests, cookie storage |
+| `platforms/bilibili` | request descriptions (`view`, `playurl`, visitor cookies, danmaku/subtitles), payload parsers | performing requests, cookie storage |
 | `platforms/youtube` | identity only | fetching (yt-dlp) |
+| `select` | choosing streams from parsed candidates by `Policy` | nothing |
+| `naming` | deterministic, filesystem-safe filenames | writing them |
 | `chain` | ordered engines, completeness check, attempt log | the engines themselves |
 | `deliver` | upload-vs-card decision over policy and capabilities | sinks: upload, card, NFO, note capture |
 | `conformance` | paste shapes both bots must agree on | running it in each repo's tests |
@@ -30,6 +32,10 @@ and yt-dlp's argv. Both were the same missing abstraction: nothing owned the que
 4. Absence is not a value. `None` means the source omitted it; renderers omit the field.
 5. Provenance is not persisted. The pasted text is parsed once and dropped.
 6. One intake normaliser: share-sheet punctuation, scheme, mobile hosts, short links.
+7. One selector. `select` chooses from parsed candidates by `Policy`; no parser
+   hardcodes a codec, and no bot needs its own format fork.
+8. One namer. `filename_for(ref, info, policy)` is the only filename producer, so a
+   multi-part work cannot overwrite its own part 1.
 
 ## Two policies, one pipeline
 
@@ -39,6 +45,9 @@ suzuran = Policy(auto_preview=False, redact_personal=True, show_source_link=Fals
 ```
 
 Suzuran's privacy is a policy value plus its own sinks, not a fork of the workflow.
+The same object also selects and names: `quality_max`, `codec_preference`,
+`audio_only` and `part_padding` are policy values, so one bot can keep a 480p HEVC
+library while the other previews the best AVC stream the source offers.
 
 ## Adding a platform
 

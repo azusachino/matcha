@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 from matcha import (
@@ -20,8 +22,9 @@ from matcha import (
     decide,
     parse,
 )
-from matcha.chain import ChainFailed, Probe, is_complete, run_chain
+from matcha.chain import ChainFailed, Probe, ProbeLike, is_complete, run_chain
 from matcha.errors import NeedsExpansionError
+from matcha.link import with_expanded
 
 BV = "BV1aMEj62EdA"
 
@@ -46,8 +49,6 @@ def test_short_link_needs_expansion():
 
 
 def test_expansion_keeps_the_chosen_part():
-    from matcha.link import with_expanded
-
     short = parse(f"https://b23.tv/{BV}?p=2&vd_source=x")
     assert short is not None and short.part == 2
     expanded = with_expanded(short, f"https://www.bilibili.com/video/{BV}?share_source=copy_web")
@@ -56,6 +57,27 @@ def test_expansion_keeps_the_chosen_part():
     # A target that names its own part wins over the carried one.
     other = with_expanded(short, f"https://www.bilibili.com/video/{BV}?p=3")
     assert other.part == 3
+
+
+def test_genuine_short_id_keeps_the_share_sheet_part():
+    """A b23.tv id is opaque, but ``?p=2`` beside it is not; expansion restores it."""
+    short = parse("https://b23.tv/dQw4w9WgXcQ?p=2&vd_source=abc")
+    assert short is not None and short.kind == "short_link" and short.part == 2
+    with pytest.raises(NeedsExpansionError):
+        canonical_url(short)
+    expanded = with_expanded(short, f"https://www.bilibili.com/video/{BV}")
+    assert expanded.part == 2
+    assert canonical_url(expanded) == f"https://www.bilibili.com/video/{BV}?p=2"
+
+
+def test_bangumi_part_round_trips():
+    """A part selected on an episode survives the canonical URL, not just the ref."""
+    paste = "https://www.bilibili.com/bangumi/play/ep38979504395?p=2&vd_source=abc"
+    ref = parse(paste)
+    assert ref is not None and ref.kind == "episode" and ref.part == 2
+    canonical = canonical_url(ref)
+    assert canonical == "https://www.bilibili.com/bangumi/play/ep38979504395?p=2"
+    assert parse(canonical) == ref
 
 
 def test_part_is_normalised():
@@ -169,6 +191,14 @@ def test_policy_not_capability_decides():
     assert decide(INFO, plan, blocked, Policy(auto_preview=True)) == Card(Reason.NO_ACCESS)
 
 
+def test_delivery_reports_permission_before_a_missing_plan():
+    """No preview permission is the reason; "no plan" would blame the extractor."""
+    blocked = Capabilities(max_upload_bytes=50 * 10**6, preview_allowed=False)
+    assert decide(INFO, None, blocked, Policy(auto_preview=True)) == Card(Reason.NO_ACCESS)
+    # The bot's own policy still outranks both.
+    assert decide(INFO, None, blocked, Policy(auto_preview=False)) == Card(Reason.MANUAL_POLICY)
+
+
 class _Engine:
     def __init__(self, id_: str, outcome, version="1.0"):
         self.id = id_
@@ -184,13 +214,17 @@ class _Engine:
 
 def test_chain_skips_failures_and_records_them():
     engines = [
-        _Engine("viewport", Failure("viewport", "0.5.1", Reason.RATE_LIMITED, "412")),
+        _Engine("viewport", Failure(Reason.RATE_LIMITED, "412")),
         _Engine("native", File("/tmp/a.mp4")),
     ]
     result = run_chain(engines)
     assert isinstance(result, ChainResult)
     assert result.engine == "native"
     assert [a.engine for a in result.attempts] == ["viewport", "native"]
+    # The engine id and version live on the attempt, once.
+    failure = result.attempts[0].outcome
+    assert isinstance(failure, Failure) and failure.reason == Reason.RATE_LIMITED
+    assert not hasattr(failure, "engine") and not hasattr(failure, "version")
 
 
 def test_chain_rejects_a_truncated_result():
@@ -207,3 +241,66 @@ def test_completeness_thresholds():
     assert not is_complete(Probe(0), None)
     assert not is_complete(Probe(5_000_000, 10.0), 109)
     assert is_complete(Probe(5_000_000, 108.0), 109)
+
+
+@dataclass(frozen=True)
+class _NamedProbe:
+    """A bot's richer probe: the default shape plus the questions it actually asks."""
+
+    size_bytes: int
+    duration_s: float | None
+    parsed: bool
+    named: bool
+
+
+def test_completeness_expectation_is_injectable():
+    named = _NamedProbe(5_000_000, 108.0, parsed=True, named=True)
+    unnamed = _NamedProbe(5_000_000, 108.0, parsed=True, named=False)
+    unparsed = _NamedProbe(5_000_000, 108.0, parsed=False, named=True)
+    expectation = lambda p: p.parsed and p.named  # noqa: E731
+
+    assert is_complete(named, 109, expectation=expectation)
+    assert not is_complete(unnamed, 109, expectation=expectation)
+    assert not is_complete(unparsed, 109, expectation=expectation)
+    # An injected expectation owns the verdict, so a small but valid metadata document
+    # is not rejected by the media-file stub floor; without one, the floor still holds.
+    metadata = _NamedProbe(200, None, parsed=True, named=True)
+    assert is_complete(metadata, None, expectation=expectation)
+    assert not is_complete(Probe(200), None)
+
+
+def test_chain_uses_an_injected_expectation():
+    engines = [_Engine("native", File("/tmp/a.mp4")), _Engine("ytdlp", File("/tmp/b.mp4"))]
+    probes = {
+        "/tmp/a.mp4": _NamedProbe(5_000_000, 108.0, parsed=True, named=False),
+        "/tmp/b.mp4": _NamedProbe(5_000_000, 108.0, parsed=True, named=True),
+    }
+    expectation = lambda p: p.parsed and p.named  # noqa: E731
+    result = run_chain(
+        engines,
+        probe=probes.__getitem__,
+        expected_duration_s=109,
+        expectation=expectation,
+    )
+    assert result.path == "/tmp/b.mp4"
+    with pytest.raises(ChainFailed):
+        run_chain(
+            engines[:1],
+            probe=probes.__getitem__,
+            expected_duration_s=109,
+            expectation=expectation,
+        )
+    # A plain Probe still satisfies the structural contract.
+    plain: ProbeLike = Probe(5_000_000, 108.0)
+    assert plain.size_bytes == 5_000_000
+
+
+def test_chain_accepts_a_small_metadata_document_with_an_expectation():
+    """A view body under the media floor is still a valid result when it parses/names."""
+    engines = [_Engine("native", File("/tmp/view.json"))]
+    metadata = _NamedProbe(200, None, parsed=True, named=True)
+    expectation = lambda p: p.parsed and p.named  # noqa: E731
+    result = run_chain(engines, probe=lambda _: metadata, expectation=expectation)
+    assert result.path == "/tmp/view.json"
+    with pytest.raises(ChainFailed):
+        run_chain(engines, probe=lambda _: metadata)

@@ -10,8 +10,11 @@ from __future__ import annotations
 from .deliver import decide
 from .errors import ApiError, MatchaError, NeedsExpansionError
 from .link import cache_key, canonical_url, normalize_text, parse, strip_tracking, with_expanded
+from .naming import extension_for, filename_for, slugify
 from .platforms import bilibili, youtube
+from .select import codec_family, max_height, select_audio, select_video
 from .types import (
+    DEFAULT_POLICY,
     Attempt,
     Capabilities,
     Card,
@@ -27,14 +30,17 @@ from .types import (
     Session,
     Stream,
     StreamPlan,
+    Track,
+    TrackKind,
     Unavailable,
     Upload,
     WorkRef,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
+    "DEFAULT_POLICY",
     "ApiError",
     "Attempt",
     "Capabilities",
@@ -53,6 +59,8 @@ __all__ = [
     "Session",
     "Stream",
     "StreamPlan",
+    "Track",
+    "TrackKind",
     "Unavailable",
     "Upload",
     "WorkRef",
@@ -60,9 +68,16 @@ __all__ = [
     "bilibili",
     "cache_key",
     "canonical_url",
+    "codec_family",
     "decide",
+    "extension_for",
+    "filename_for",
+    "max_height",
     "normalize_text",
     "parse",
+    "select_audio",
+    "select_video",
+    "slugify",
     "strip_tracking",
     "with_expanded",
     "youtube",
