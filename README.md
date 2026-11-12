@@ -20,6 +20,7 @@ and yt-dlp's argv. Both were the same missing abstraction: nothing owned the que
 | `chain` | ordered engines, completeness check, attempt log | the engines themselves |
 | `deliver` | upload-vs-card decision over policy and capabilities | sinks: upload, card, NFO, note capture |
 | `conformance` | paste shapes both bots must agree on | running it in each repo's tests |
+| `docs/roadmap.md` | feature priorities grounded in yt-dlp / gallery-dl / yutto | nothing |
 
 ## The invariants
 
