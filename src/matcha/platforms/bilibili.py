@@ -331,12 +331,19 @@ def _stream(raw: dict) -> Stream:
 
 
 def _quality_label(data: dict, video: Stream | None) -> str:
+    """Name the chosen quality, falling back to the body's own quality id.
+
+    ``fnval=4048`` can return ids the label table does not know (125 HDR, 126 Dolby,
+    130 Dolby Vision). Those are still a 4K/Dolby rendition, so the body's ``quality``
+    field (what the API says it selected) is a better label than a raw pixel size.
+    """
     if video is None:
         return "audio"
-    quality_id = video.quality_id or int(data.get("quality") or 0)
-    name = QUALITY_NAMES.get(quality_id)
-    if name:
-        return name
+    body_quality = int(data.get("quality") or 0)
+    for quality_id in (video.quality_id, body_quality):
+        name = QUALITY_NAMES.get(quality_id or 0)
+        if name:
+            return name
     if video.height:
         return f"{video.width}x{video.height}" if video.width else f"{video.height}p"
     return ""

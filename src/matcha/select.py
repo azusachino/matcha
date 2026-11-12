@@ -84,6 +84,12 @@ def _rank(stream: Stream, preference: tuple[str, ...]) -> int:
 def select_video(streams: Sequence[Stream], policy: Policy) -> Stream | None:
     """Pick one video stream: quality cap first, then codec preference, then quality.
 
+    Codec preference is a priority, not a tie-breaker: a preferred 480p stream beats an
+    unlisted 4K one, which is what the old AVC-first pick did. When the preferred codec
+    is absent the next entry wins the same way (``hevc`` before ``av01`` before an
+    unlisted codec), so the fallback is never accidental. An empty
+    ``codec_preference`` ranks every stream equally and lets height/bandwidth decide.
+
     A stream whose height the source did not publish is eligible under a cap -- absence
     is not evidence that it exceeds the cap -- but a known-height stream wins the tie.
     Returns ``None`` when the policy is audio-only or the cap excludes every candidate.

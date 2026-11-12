@@ -132,7 +132,8 @@ def filename_for(
 
     room = max(32, MAX_STEM_BYTES - len(suffix.encode("utf-8")))
     stem = f"{_truncate(title, room)}{suffix}".strip()
-    if stem.lower() in RESERVED_NAMES:
+    # Windows reserves the name before the first dot: "CON.txt" is as unusable as "CON".
+    if stem.split(".", 1)[0].lower() in RESERVED_NAMES:
         stem = f"_{stem}"
     extension = extension_for(content_type, platform=ref.platform, audio_only=policy.audio_only)
     return f"{stem}.{extension}"

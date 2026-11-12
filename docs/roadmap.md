@@ -21,6 +21,22 @@ bot — matcha only describes, parses, selects and decides.
 Shipped in 0.2.0: priorities 1-3 (`select.py` policy selection, `naming.py`,
 and `Track` sidecars with Bilibili danmaku/subtitle request descriptions).
 
+## 0.2.0 migration notes
+
+Two changes are not source-compatible for consumers pinning 0.1.0:
+
+- **`Failure` drops `engine`/`version`.** `Attempt` already carries both, so the
+  outcome no longer repeats them. Change every call site from
+  `Failure(engine, version, reason, detail)` to `Failure(reason, detail)`;
+  suzuran's `media_chain.py` had five at review time.
+- **`deliver.decide` checks preview permission before a missing plan.** For
+  `auto_preview=True` consumers the `(plan=None, preview_allowed=False)` cell
+  changes from `Card(NO_PLAN)` to `Card(NO_ACCESS)` — a user-visible caption
+  change in daphne. Daphne should pin that cell when it re-pins matcha.
+
+Additive changes (`Policy` fields, `Track`, `StreamPlan.tracks`,
+`MediaInfo.tracks`, `is_complete(expectation=...)`) keep their old defaults.
+
 1. **Format policy** — replace the hardcoded AVC-first stream pick with
    `Policy` values: `quality_max`, `codec_preference`, `audio_only`.
    Selection becomes `select.py`: choose from parsed streams by policy.

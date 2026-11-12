@@ -83,6 +83,14 @@ def test_reserved_and_awkward_names_stay_creatable():
     assert filename_for(ref, info("Title. ")) == "Title.mp4"
 
 
+def test_reserved_names_apply_before_the_first_dot():
+    ref = WorkRef("bilibili", "video", BV)
+    assert filename_for(ref, info("CON.txt")) == "_CON.txt.mp4"
+    assert filename_for(ref, info("aux.2024")) == "_aux.2024.mp4"
+    # A dotted name that is not reserved is left alone.
+    assert filename_for(ref, info("final.v2")) == "final.v2.mp4"
+
+
 def test_a_long_title_is_truncated_by_bytes_not_characters():
     ref = WorkRef("bilibili", "video", BV)
     name = filename_for(ref, info("猫" * 300))
