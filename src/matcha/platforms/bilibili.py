@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 from ..errors import ApiError, NeedsExpansionError
 from ..select import select_audio, select_video
 from ..types import (
-    DEFAULT_POLICY,
+    SELECTION_DEFAULT,
     MediaInfo,
     PartInfo,
     Policy,
@@ -91,9 +91,23 @@ def view_request(ref: WorkRef, session: Session) -> Request:
     )
 
 
-def playurl_request(ref: WorkRef, session: Session, *, qn: int = 80) -> Request:
+def playurl_request(ref: WorkRef, session: Session, *, cid: int, qn: int = 80) -> Request:
+    """The DASH plan request for one part.
+
+    ``cid`` is required, not optional: the endpoint answers -400 without it even for a
+    ``bvid`` link (measured live), so a description that leaves it to the caller is a
+    description that fails. The value comes from the ``view`` body the caller has already
+    read -- :attr:`MediaInfo.cid` for the selected part -- so nothing here re-reads it.
+
+    ``cid`` is authoritative and ``page`` is bookkeeping: where a caller's values disagree,
+    the endpoint serves the cid's part (measured: part 1's cid with ``page=2`` returns part
+    1's stream), which is why the cid is the required argument.
+    """
+    if cid < 1:
+        raise ValueError("cid must be the part's positive player id")
     params = {
         **api_params(ref),
+        "cid": str(cid),
         "fnval": str(FNVAL_DASH),
         "fnver": "0",
         "fourk": "1",
@@ -101,8 +115,6 @@ def playurl_request(ref: WorkRef, session: Session, *, qn: int = 80) -> Request:
     }
     if ref.part:
         params["page"] = str(ref.part)
-    if "aid" in params:
-        params["cid"] = ""  # filled by the caller from view(); keeps the request honest
     return Request(
         "GET",
         f"{API_BASE}/x/player/playurl",
@@ -193,9 +205,14 @@ def expand_request(ref: WorkRef) -> Request:
 
 
 def _expect_ok(body: dict) -> dict:
+    """The ``data`` of a successful body, or the platform's refusal as an :class:`ApiError`.
+
+    A body without a numeric ``code`` is not a platform refusal, so it is reported as
+    ``-1`` (matcha's own "the payload made no sense") rather than as a fabricated code.
+    """
     code = body.get("code")
     if code != 0:
-        raise ApiError(code, body.get("message") or "")
+        raise ApiError(code if isinstance(code, int) else -1, str(body.get("message") or ""))
     return body.get("data") or {}
 
 
@@ -258,6 +275,18 @@ def _merge_tracks(*groups: tuple[Track, ...]) -> tuple[Track, ...]:
     return tuple(merged)
 
 
+def _published_cid(body_or_page: dict) -> int | None:
+    """The ``cid`` a page or a body publishes, or ``None``: a placeholder addresses the
+    wrong part."""
+    value = body_or_page.get("cid")
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
     """Read a `view` body. Fields the source omits stay ``None``, never a placeholder."""
     data = _expect_ok(body)
@@ -266,9 +295,15 @@ def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
             index=int(page.get("page") or index + 1),
             title=str(page.get("part") or ""),
             duration_s=float(page["duration"]) if page.get("duration") else None,
+            cid=_published_cid(page),
         )
         for index, page in enumerate(data.get("pages") or [])
     ]
+    # A body that publishes the cid only at ``data.cid`` would otherwise lose it, so that
+    # value is used as a fallback -- but *only* when the body publishes no pages at all.
+    # Measured: ``data.cid`` names part 1 even for a ``?p=2`` link, so an unguarded
+    # fallback would address part 1 for any part selection.
+    body_cid = _published_cid(data) if not pages else None
     owner = data.get("owner") or {}
     selected = None
     if ref.part and pages:
@@ -291,10 +326,11 @@ def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
         parts=tuple(pages),
         canonical_url=canonical,
         tracks=subtitle_tracks(data),
+        body_cid=body_cid,
     )
 
 
-def pick_video_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
+def pick_video_stream(dash: dict, policy: Policy = SELECTION_DEFAULT) -> Stream:
     """The policy's video choice from a DASH object; kept for callers that hold one."""
     streams = [_stream(raw) for raw in dash.get("video") or [] if isinstance(raw, dict)]
     chosen = select_video(streams, policy)
@@ -303,7 +339,7 @@ def pick_video_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
     return chosen
 
 
-def pick_audio_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
+def pick_audio_stream(dash: dict, policy: Policy = SELECTION_DEFAULT) -> Stream:
     streams = [_stream(raw) for raw in dash.get("audio") or [] if isinstance(raw, dict)]
     chosen = select_audio(streams, policy)
     if chosen is None:
@@ -353,7 +389,7 @@ def parse_playurl(
     body: dict,
     *,
     duration_s: float | None = None,
-    policy: Policy = DEFAULT_POLICY,
+    policy: Policy = SELECTION_DEFAULT,
     tracks: tuple[Track, ...] = (),
 ) -> StreamPlan:
     """Price a DASH response under ``policy``: chosen streams, bytes and sidecars.
@@ -392,6 +428,7 @@ def parse_pagelist(body: dict) -> tuple[PartInfo, ...]:
             index=int(page.get("page") or index + 1),
             title=str(page.get("part") or ""),
             duration_s=float(page["duration"]) if page.get("duration") else None,
+            cid=_published_cid(page),
         )
         for index, page in enumerate(_expect_ok(body).get("pages") or [])
         if isinstance(page, dict)

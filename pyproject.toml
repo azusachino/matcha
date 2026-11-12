@@ -1,12 +1,12 @@
 [project]
 name = "matcha"
-version = "0.2.0"
+version = "0.3.0"
 description = "Pure link identity, metadata reading, engine chaining and delivery policy shared by daphne and suzuran"
 requires-python = ">=3.11"
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["mypy>=1.11", "pytest>=8", "ruff>=0.6"]
 
 [build-system]
 requires = ["hatchling"]
@@ -14,6 +14,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/matcha"]
+# hatchling already ships every file in the package, so this is belt and braces: it keeps
+# the marker in the wheel even if the default include rules change (checked with uv build).
+include = ["src/matcha/py.typed"]
 
 [tool.ruff]
 line-length = 100
@@ -22,6 +25,19 @@ src = ["src"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+check_untyped_defs = true
+warn_unused_ignores = true
+
+# The library is fully annotated; the existing test helpers are not, and annotating
+# them is separate work (79 pre-existing errors). The override keeps the stricter rule
+# where it protects consumers: every public matcha function returns a typed value.
+[[tool.mypy.overrides]]
+module = ["matcha", "matcha.*"]
+disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from matcha import (
+    SELECTION_DEFAULT,
     ApiError,
     Capabilities,
     Card,
@@ -14,16 +15,18 @@ from matcha import (
     MediaInfo,
     Policy,
     Reason,
+    Session,
     StreamPlan,
     Upload,
+    WorkRef,
     bilibili,
     canonical_url,
     conformance,
     decide,
     parse,
 )
-from matcha.chain import ChainFailed, Probe, ProbeLike, is_complete, run_chain
-from matcha.errors import NeedsExpansionError
+from matcha.chain import ChainFailed, Expectation, Probe, ProbeLike, is_complete, run_chain
+from matcha.errors import MatchaError, NeedsExpansionError, PolicyError
 from matcha.link import with_expanded
 
 BV = "BV1aMEj62EdA"
@@ -85,7 +88,8 @@ def test_part_is_normalised():
     assert parse(f"https://www.bilibili.com/video/{BV}?p=2").part == 2  # type: ignore[union-attr]
 
 
-VIEW = {
+#: A `view` body with two pages; untyped on purpose, it is raw JSON from the endpoint.
+VIEW: dict = {
     "code": 0,
     "data": {
         "title": "🐱躲在超市后门哈气的二人🐱",
@@ -120,10 +124,123 @@ def test_parse_view_keeps_absent_fields_absent():
 
 
 def test_parse_view_rejects_error_codes():
-    with pytest.raises(ApiError):
-        bilibili.parse_view(
-            {"code": -404, "message": "啥都木有"}, parse("https://b23.tv/BV1aMEj62EdA")
-        )
+    ref = parse("https://b23.tv/BV1aMEj62EdA")
+    assert ref is not None
+    with pytest.raises(ApiError) as caught:
+        bilibili.parse_view({"code": -404, "message": "啥都木有"}, ref)
+    assert caught.value.code == -404
+    # A body with no numeric code is not the platform's own refusal.
+    with pytest.raises(ApiError) as garbled:
+        bilibili.parse_view({"code": None, "message": ""}, WorkRef("bilibili", "video", BV))
+    assert garbled.value.code == -1
+
+
+def test_parse_view_carries_each_parts_cid():
+    """The cid belongs to the part, so no caller has to re-read the view body for it."""
+    ref = parse(f"https://www.bilibili.com/video/{BV}?p=2")
+    assert ref is not None
+    info = bilibili.parse_view(VIEW, ref)
+    assert [part.cid for part in info.parts] == [38979504395, 39558775483]
+    assert info.selected_part is info.parts[1]
+    assert info.cid == 39558775483
+
+
+def test_selected_part_falls_back_to_the_first_page_only_when_none_was_chosen():
+    no_part = bilibili.parse_view(VIEW, WorkRef("bilibili", "video", BV))
+    assert no_part.selected_part is no_part.parts[0]
+    assert no_part.cid == 38979504395
+    # A part the body does not publish is ``None``, not a silent page 1.
+    missing = bilibili.parse_view(VIEW, WorkRef("bilibili", "part", BV, 5))
+    assert missing.selected_part is None and missing.cid is None
+
+
+def test_a_body_with_no_pages_falls_back_to_its_own_cid():
+    """Some single-part bodies publish the cid only at ``data.cid``; keep that one."""
+    body = {"code": 0, "data": {"title": "t", "cid": 111, "duration": 60}}
+    info = bilibili.parse_view(body, WorkRef("bilibili", "video", BV))
+    assert info.parts == () and info.selected_part is None
+    assert info.body_cid == 111
+    assert info.cid == 111
+    # An unusable body cid is still absent, not zero.
+    empty = bilibili.parse_view(
+        {"code": 0, "data": {"title": "t", "cid": ""}}, WorkRef("bilibili", "video", BV)
+    )
+    assert empty.body_cid is None and empty.cid is None
+
+
+def test_a_selected_part_never_falls_back_to_the_bodys_cid():
+    """``data.cid`` names part 1 (measured), so a ``?p=2`` link must not resolve to it."""
+    body = {"code": 0, "data": {**VIEW["data"], "cid": 38979504395}}
+    info = bilibili.parse_view(body, WorkRef("bilibili", "part", BV, 2))
+    assert info.body_cid is None  # a body with pages hands on no fallback at all
+    assert info.cid == 39558775483
+    # An unpublished part stays unresolved rather than becoming part 1's cid.
+    missing = bilibili.parse_view(body, WorkRef("bilibili", "part", BV, 9))
+    assert missing.cid is None
+
+
+def test_parse_view_keeps_an_unusable_cid_absent():
+    body = {
+        "code": 0,
+        "data": {
+            "title": "t",
+            "pages": [
+                {"page": 1, "part": "a", "cid": ""},
+                {"page": 2, "part": "b", "cid": "not-a-number"},
+                {"page": 3, "part": "c"},
+            ],
+        },
+    }
+    info = bilibili.parse_view(body, WorkRef("bilibili", "video", BV))
+    assert [part.cid for part in info.parts] == [None, None, None]
+    assert info.cid is None
+
+
+def test_parse_pagelist_carries_cids():
+    body = {"code": 0, "data": {"pages": [{"page": 1, "part": "a", "cid": 42}]}}
+    assert bilibili.parse_pagelist(body)[0].cid == 42
+
+
+def test_playurl_request_carries_the_cid_it_is_given():
+    """``playurl`` answers -400 without a cid, for a bvid link too (measured live)."""
+    ref = parse(f"https://www.bilibili.com/video/{BV}?p=2")
+    assert ref is not None
+    request = bilibili.playurl_request(
+        ref, Session({"SESSDATA": "secret"}), cid=39558775483, qn=120
+    )
+    params = dict(request.params)
+    assert params["cid"] == "39558775483"
+    assert params["bvid"] == BV and params["page"] == "2"
+    assert params["fnval"] == "4048" and params["qn"] == "120"
+    assert request.url.endswith("/x/player/playurl")
+    assert request.cookies == {"SESSDATA": "secret"}
+
+
+def test_playurl_request_carries_the_cid_for_a_legacy_aid_link():
+    ref = parse("https://www.bilibili.com/video/av170001")
+    assert ref is not None
+    params = dict(bilibili.playurl_request(ref, Session(), cid=77112233).params)
+    assert params["aid"] == "170001"
+    assert params["cid"] == "77112233"  # a cid is its own id, not the aid
+    assert "cid" in dict(bilibili.playurl_request(ref, Session(), cid=77112233).params)
+
+
+def test_playurl_request_refuses_an_absent_or_zero_cid():
+    ref = parse(f"https://www.bilibili.com/video/{BV}")
+    assert ref is not None
+    with pytest.raises(TypeError):
+        bilibili.playurl_request(ref, Session())  # type: ignore[call-arg]
+    with pytest.raises(ValueError):
+        bilibili.playurl_request(ref, Session(), cid=0)
+
+
+def test_view_cid_feeds_the_playurl_request_without_a_second_read():
+    ref = parse(f"https://www.bilibili.com/video/{BV}?p=2")
+    assert ref is not None
+    info = bilibili.parse_view(VIEW, ref)
+    assert info.cid is not None
+    params = dict(bilibili.playurl_request(ref, Session(), cid=info.cid).params)
+    assert params["cid"] == "39558775483"
 
 
 PLAYURL = {
@@ -189,6 +306,21 @@ def test_policy_not_capability_decides():
     assert decide(INFO, big, caps, Policy(auto_preview=True)) == Card(Reason.TOO_LARGE)
     blocked = Capabilities(max_upload_bytes=50 * 10**6, preview_allowed=False)
     assert decide(INFO, plan, blocked, Policy(auto_preview=True)) == Card(Reason.NO_ACCESS)
+
+
+def test_decide_refuses_a_policy_with_no_delivery_decision():
+    """A selection default must not be read as "this bot chose a human"."""
+    plan = StreamPlan(
+        video=None, audio=None, estimated_bytes=10**6, quality="480p", needs_merge=True
+    )
+    caps = Capabilities(max_upload_bytes=50 * 10**6)
+    with pytest.raises(PolicyError):
+        decide(INFO, plan, caps, SELECTION_DEFAULT)
+    with pytest.raises(PolicyError):
+        decide(INFO, None, caps, Policy())
+    # A bot's sink already catches MatchaError; an unset policy must not escape it.
+    with pytest.raises(MatchaError):
+        decide(INFO, plan, caps, Policy())
 
 
 def test_delivery_reports_permission_before_a_missing_plan():
@@ -267,6 +399,23 @@ def test_completeness_expectation_is_injectable():
     metadata = _NamedProbe(200, None, parsed=True, named=True)
     assert is_complete(metadata, None, expectation=expectation)
     assert not is_complete(Probe(200), None)
+
+
+def test_expectation_alias_binds_to_the_callers_probe():
+    """Typed, not Any: a richer probe's expectation is expressible and is accepted.
+
+    The old ``Callable[[ProbeLike], bool]`` alias made this assignment a type error while
+    the runtime happily called it -- which is how the mismatch stayed invisible.
+    """
+
+    def names_the_work(probe: _NamedProbe) -> bool:
+        return probe.parsed and probe.named
+
+    expectation: Expectation[_NamedProbe] = names_the_work
+    named = _NamedProbe(5_000_000, 108.0, parsed=True, named=True)
+    unnamed = _NamedProbe(5_000_000, 108.0, parsed=True, named=False)
+    assert is_complete(named, 109, expectation=expectation)
+    assert not is_complete(unnamed, 109, expectation=expectation)
 
 
 def test_chain_uses_an_injected_expectation():

@@ -67,9 +67,17 @@ class Request:
 
 @dataclass(frozen=True, slots=True)
 class PartInfo:
+    """One part (page) of a work, as the source published it.
+
+    ``cid`` is the part's player id, the identifier ``playurl`` and the danmaku endpoints
+    actually address. It stays ``None`` when the source omitted it, so a caller that
+    needs one treats that as "no plan", not as zero.
+    """
+
     index: int
     title: str
     duration_s: float | None = None
+    cid: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,19 +101,66 @@ class MediaInfo:
     parts: tuple[PartInfo, ...] = ()
     canonical_url: str = ""
     tracks: tuple[Track, ...] = ()
+    # The body's own top-level ``cid``, when it published one. It names part 1 whatever
+    # part was asked for (measured: a ``?p=2`` link still carries part 1's cid here), so
+    # :attr:`cid` uses it only for a body that published no pages at all.
+    body_cid: int | None = None
 
     @property
     def is_multi_part(self) -> bool:
         return len(self.parts) > 1
 
+    @property
+    def selected_part(self) -> PartInfo | None:
+        """The page this info is about, so a caller needs no second read of the body.
+
+        With no part selected, that is the body's first page. With ``part`` set, it is
+        that page -- and ``None`` when the body does not publish it, never a silent page
+        1. ``parse_view`` reads its duration from the same page.
+        """
+        if not self.parts:
+            return None
+        if self.part is None:
+            return self.parts[0]
+        return next((page for page in self.parts if page.index == self.part), None)
+
+    @property
+    def cid(self) -> int | None:
+        """The cid ``playurl_request`` needs: the selected part's, or the body's own.
+
+        A body that published no pages at all falls back to its top-level ``cid``, since
+        that is the only cid it offers. Once a page exists the fallback is never used:
+        that cid belongs to part 1 even when another part was selected.
+        """
+        if not self.parts:
+            return self.body_cid
+        part = self.selected_part
+        return None if part is None else part.cid
+
 
 class TrackKind(StrEnum):
-    """What a sidecar file is. Conversion to a playable format stays in the bot."""
+    """What a sidecar file is. Conversion to a playable format stays in the bot.
+
+    A kind belongs here once a parser under ``platforms/`` produces it; vocabulary that
+    nothing produces yet is listed in :data:`RESERVED_TRACK_KINDS`. That list documents
+    intent -- it is not enforced, so a branch on a reserved kind still type-checks and
+    runs. Check it before relying on a kind arriving.
+    """
 
     SUBTITLE = "subtitle"
     DANMAKU = "danmaku"
     CHAPTERS = "chapters"
     THUMBNAIL = "thumbnail"
+
+
+#: Kinds no parser produces yet: **documentary, not enforced**. The members still exist
+#: and still construct, so nothing fails if a bot branches on one; this list only separates
+#: committed vocabulary from planned vocabulary, and a test guards that the parsers stay
+#: out of it. ``CHAPTERS`` is reserved because chapter markers arrive inline in a player
+#: body, not as a downloadable sidecar URL. ``THUMBNAIL`` is reserved because a work's
+#: cover already has exactly one home, :attr:`MediaInfo.thumbnail_url`; the kind would only
+#: name a cover *sidecar* file, which no parser describes.
+RESERVED_TRACK_KINDS: frozenset[TrackKind] = frozenset({TrackKind.CHAPTERS, TrackKind.THUMBNAIL})
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +169,10 @@ class Track:
 
     ``lang`` is the source's own label (``zh-CN``, ``ai-zh``) and stays ``None`` when
     the source omitted it. ``format`` names the wire format (``json``, ``xml``,
-    ``protobuf``) so the bot can pick a converter without sniffing bytes.
+    ``protobuf``) so the bot can pick a converter without sniffing bytes. It is the
+    source's published field when there is one, and an inference otherwise: a Bilibili
+    subtitle entry that omits ``format`` is labelled ``json`` because its URL ends in
+    ``.json`` -- an inference, not a published field.
     """
 
     url: str
@@ -166,9 +224,14 @@ class Policy:
     suzuran keeps a private library, so it previews nothing automatically, redacts its
     own identifiers too, hides the source link and stores metadata. daphne converts in
     chat, so it previews small files and shows the canonical source.
+
+    ``auto_preview`` is the one *delivery* decision. ``None`` means this policy has not
+    made it -- which is what a policy built for selection or naming looks like. Selection
+    and naming never read it; :func:`matcha.deliver.decide` refuses it rather than turn an
+    unstated decision into a card.
     """
 
-    auto_preview: bool
+    auto_preview: bool | None = None
     redact_personal: bool = False
     show_source_link: bool = True
     store_metadata: bool = False
@@ -179,9 +242,11 @@ class Policy:
     part_padding: int = 0
 
 
-#: Selection defaults: highest AVC stream the source offers, simple ``[P2]`` names.
-#: A bot overrides only what it disagrees with; selection never reads capabilities.
-DEFAULT_POLICY = Policy(auto_preview=False)
+#: Selection and naming defaults: the highest stream the source offers with the preferred
+#: codec first, and simple ``[P2]`` names. Deliberately carries no delivery decision
+#: (``auto_preview`` is ``None``), because a bot's upload choice is not a default; state
+#: it explicitly before calling :func:`matcha.deliver.decide`.
+SELECTION_DEFAULT = Policy()
 
 
 @dataclass(frozen=True, slots=True)

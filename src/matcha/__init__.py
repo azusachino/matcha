@@ -8,13 +8,14 @@ metadata parsing, engine chaining and delivery decision come from here.
 from __future__ import annotations
 
 from .deliver import decide
-from .errors import ApiError, MatchaError, NeedsExpansionError
+from .errors import ApiError, MatchaError, NeedsExpansionError, PolicyError
 from .link import cache_key, canonical_url, normalize_text, parse, strip_tracking, with_expanded
 from .naming import extension_for, filename_for, slugify
 from .platforms import bilibili, youtube
 from .select import codec_family, max_height, select_audio, select_video
 from .types import (
-    DEFAULT_POLICY,
+    RESERVED_TRACK_KINDS,
+    SELECTION_DEFAULT,
     Attempt,
     Capabilities,
     Card,
@@ -37,10 +38,11 @@ from .types import (
     WorkRef,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
-    "DEFAULT_POLICY",
+    "RESERVED_TRACK_KINDS",
+    "SELECTION_DEFAULT",
     "ApiError",
     "Attempt",
     "Capabilities",
@@ -54,6 +56,7 @@ __all__ = [
     "NeedsExpansionError",
     "PartInfo",
     "Policy",
+    "PolicyError",
     "Reason",
     "Request",
     "Session",

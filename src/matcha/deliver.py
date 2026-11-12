@@ -3,11 +3,13 @@
 Policy, not capability, decides. A bot that can upload does not therefore upload: the
 rule table is explicit per bot, so a new capacity (a size we happen to know) cannot
 silently change behavior. That is why ``auto_preview`` exists as a field instead of
-being inferred from whether a plan is available.
+being inferred from whether a plan is available -- and why a policy that leaves it
+unset cannot deliver at all.
 """
 
 from __future__ import annotations
 
+from .errors import PolicyError
 from .types import (
     Capabilities,
     Card,
@@ -32,7 +34,14 @@ def decide(
     and only then whether a plan exists. A chat that may not preview must hear "no
     access", not "no plan" -- the latter would report a failure to price a download
     that policy had already forbidden.
+
+    A policy whose ``auto_preview`` is ``None`` has made no decision, and this raises
+    :class:`~matcha.errors.PolicyError` instead of reporting ``MANUAL_POLICY``: a selection
+    default must not be read as "this bot chose a human", which would put an invented
+    intent in a user-visible card.
     """
+    if policy.auto_preview is None:
+        raise PolicyError()
     if not policy.auto_preview:
         return Card(Reason.MANUAL_POLICY)
     if not caps.preview_allowed:

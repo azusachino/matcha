@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import pytest
 
-from matcha import MediaInfo, Request, Session, StreamPlan, Track, TrackKind, bilibili, parse
+from matcha import (
+    RESERVED_TRACK_KINDS,
+    MediaInfo,
+    Request,
+    Session,
+    StreamPlan,
+    Track,
+    TrackKind,
+    bilibili,
+    parse,
+)
 
 BV = "BV1aMEj62EdA"
 
@@ -71,6 +81,60 @@ def test_parse_view_reads_a_bangumi_subtitle_list():
     assert [t.format for t in info.tracks] == ["json", "json", "srt"]
     assert info.tracks[0].url == "https://aisubtitle.hdslb.com/bfs/ai_subtitle/1.json"
     assert all(t.kind is TrackKind.SUBTITLE for t in info.tracks)
+
+
+def test_reserved_kinds_are_declared_and_nothing_else_is_reserved():
+    """A kind is vocabulary only because a parser produces it, or it is marked reserved."""
+    assert frozenset({TrackKind.CHAPTERS, TrackKind.THUMBNAIL}) == RESERVED_TRACK_KINDS
+    assert set(TrackKind) - RESERVED_TRACK_KINDS == {TrackKind.SUBTITLE, TrackKind.DANMAKU}
+
+
+def test_no_parser_produces_a_reserved_kind():
+    """A bot must not be able to write a branch for a track that never arrives."""
+    ref = parse(f"https://www.bilibili.com/video/{BV}")
+    assert ref is not None
+    info = bilibili.parse_view(VIEW_WITH_SUBTITLES, ref)
+    plan = bilibili.parse_playurl(
+        PLAYURL_WITH_SUBTITLES, tracks=(bilibili.danmaku_track(38979504395),)
+    )
+    produced = {track.kind for track in (*info.tracks, *plan.tracks)}
+    assert produced and produced.isdisjoint(RESERVED_TRACK_KINDS)
+
+
+def test_a_thumbnail_has_exactly_one_home():
+    """The cover is metadata on MediaInfo; nothing publishes it as a sidecar track."""
+    body = {
+        "code": 0,
+        "data": {
+            "title": "t",
+            "pic": "http://i2.hdslb.com/bfs/archive/cover.png",
+            "subtitle": [{"lan": "zh-CN", "subtitle_url": "https://example/1.json"}],
+        },
+    }
+    ref = parse(f"https://www.bilibili.com/video/{BV}")
+    assert ref is not None
+    info = bilibili.parse_view(body, ref)
+    assert info.thumbnail_url == "http://i2.hdslb.com/bfs/archive/cover.png"
+    assert TrackKind.THUMBNAIL not in {track.kind for track in info.tracks}
+
+
+def test_format_is_a_published_field_or_a_json_suffix_inference():
+    """``format`` is inferred from a ``.json`` URL only when the body omits it."""
+    body = {
+        "code": 0,
+        "data": {
+            "title": "t",
+            "subtitle": [
+                {"lan": "zh-CN", "subtitle_url": "https://example/a.json"},
+                {"lan": "ja", "subtitle_url": "https://example/b.json", "format": "srt"},
+                {"lan": "ko", "subtitle_url": "https://example/c.dat"},
+            ],
+        },
+    }
+    ref = parse(f"https://www.bilibili.com/video/{BV}")
+    assert ref is not None
+    info = bilibili.parse_view(body, ref)
+    assert [track.format for track in info.tracks] == ["json", "srt", None]
 
 
 def test_parse_view_keeps_absent_subtitles_absent():
