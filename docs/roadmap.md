@@ -21,6 +21,32 @@ bot — matcha only describes, parses, selects and decides.
 Shipped in 0.2.0: priorities 1-3 (`select.py` policy selection, `naming.py`,
 and `Track` sidecars with Bilibili danmaku/subtitle request descriptions).
 
+Shipped in 0.3.0: the v0.2.0 consumer follow-ups (issue #2) -- part cids on the
+metadata, a selection default that is not a delivery decision, reserved track
+vocabulary, and a type-check gate.
+
+## 0.3.0 migration notes
+
+- **`playurl_request` requires `cid`.** The endpoint answers -400 without one even
+  for a `bvid` link, so the keyword is required and always sent; a request
+  description no longer carries a blank placeholder for the caller to patch.
+  Read it from `MediaInfo.cid` (or `MediaInfo.selected_part.cid`) instead of
+  re-reading the `view` body: daphne's `_cid()` and its parameter surgery in
+  `_plan()` both go away.
+- **`DEFAULT_POLICY` is now `SELECTION_DEFAULT`**, and `Policy.auto_preview` is
+  `bool | None` defaulting to `None`. Selection and naming never read it, and
+  `deliver.decide()` raises `ValueError` on an unset policy rather than reporting
+  `MANUAL_POLICY` -- a consumer that used the old constant for `decide()` was
+  getting suzuran's product choice as its own. State `auto_preview` explicitly.
+- **`PartInfo.cid` and `MediaInfo.cid` are new** and additive; both stay `None`
+  when the source published no usable cid.
+- **`TrackKind.CHAPTERS`/`TrackKind.THUMBNAIL` are reserved**, listed in
+  `RESERVED_TRACK_KINDS`: no parser produces them, and a cover's one home is
+  `MediaInfo.thumbnail_url`.
+- **`expectation=` is typed against the caller's probe** (`Expectation[P]`), so a
+  bot's richer probe no longer only works by accident. `make check` now runs
+  mypy so the next such mismatch is caught instead of passing.
+
 ## 0.2.0 migration notes
 
 Two changes are not source-compatible for consumers pinning 0.1.0:
