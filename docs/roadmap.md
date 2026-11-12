@@ -18,6 +18,9 @@ bot — matcha only describes, parses, selects and decides.
 
 ## Priority order
 
+Shipped in 0.2.0: priorities 1-3 (`select.py` policy selection, `naming.py`,
+and `Track` sidecars with Bilibili danmaku/subtitle request descriptions).
+
 1. **Format policy** — replace the hardcoded AVC-first stream pick with
    `Policy` values: `quality_max`, `codec_preference`, `audio_only`.
    Selection becomes `select.py`: choose from parsed streams by policy.

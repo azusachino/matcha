@@ -58,6 +58,15 @@ CASES: tuple[tuple[str, str, str, str, int | None, int | None, str], ...] = (
         f"https://www.bilibili.com/video/{BV}",
     ),
     (
+        "b23.tv/BV1aMEj62EdA?p=2&vd_source=abc",
+        "bilibili",
+        "part",
+        BV,
+        2,
+        None,
+        f"https://www.bilibili.com/video/{BV}?p=2",
+    ),
+    (
         "https://bilibili.com/video/av170001",
         "bilibili",
         "video",
@@ -74,6 +83,15 @@ CASES: tuple[tuple[str, str, str, str, int | None, int | None, str], ...] = (
         None,
         None,
         "https://www.bilibili.com/bangumi/play/ep38979504395",
+    ),
+    (
+        "https://www.bilibili.com/bangumi/play/ep38979504395?p=2&vd_source=abc",
+        "bilibili",
+        "episode",
+        "ep38979504395",
+        2,
+        None,
+        "https://www.bilibili.com/bangumi/play/ep38979504395?p=2",
     ),
     (
         f"https://www.bilibili.com/video/{BV}，",

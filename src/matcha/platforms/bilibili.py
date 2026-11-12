@@ -15,16 +15,22 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+from urllib.parse import urlencode
 
 from ..errors import ApiError, NeedsExpansionError
+from ..select import select_audio, select_video
 from ..types import (
+    DEFAULT_POLICY,
     MediaInfo,
     PartInfo,
+    Policy,
     Reason,
     Request,
     Session,
     Stream,
     StreamPlan,
+    Track,
+    TrackKind,
     WorkRef,
 )
 from .base import PlatformSpec
@@ -39,7 +45,11 @@ USER_AGENT = (
 TICKET_URL = f"{API_BASE}/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket"
 TICKET_KEY = b"XgwSnGZ1p"
 FNVAL_DASH = 4048
-AVC_CODEC_ID = 7
+DANMAKU_LIST_PATH = "/x/v1/dm/list.so"
+DANMAKU_SEGMENT_PATH = "/x/v2/dm/web/seg.so"
+
+#: Older DASH bodies carry only ``codecid``; map it so codec preference still works.
+CODEC_ID_FAMILIES = {7: "avc1", 12: "av01", 13: "hevc"}
 
 QUALITY_NAMES = {
     16: "360p",
@@ -107,6 +117,55 @@ def spi_request() -> Request:
     return Request("GET", f"{API_BASE}/x/frontend/finger/spi", headers=default_headers())
 
 
+def danmaku_track(cid: int, *, aid: int | None = None, segment: int | None = None) -> Track:
+    """The danmaku sidecar for one part.
+
+    ``list.so`` is the whole-file XML list. The protobuf form is the segmented
+    ``seg.so`` endpoint, which needs the numeric ``aid`` (``pid``) as well as the cid;
+    conversion to ASS stays in the bot.
+    """
+    if segment is None:
+        return Track(
+            f"{API_BASE}{DANMAKU_LIST_PATH}?{urlencode({'oid': cid})}",
+            None,
+            "xml",
+            TrackKind.DANMAKU,
+        )
+    if aid is None:
+        raise ValueError("protobuf danmaku segments need the numeric aid (pid)")
+    if segment < 1:
+        raise ValueError("segment must be >= 1")
+    query = urlencode({"type": 1, "oid": cid, "pid": aid, "segment_index": segment})
+    return Track(
+        f"{API_BASE}{DANMAKU_SEGMENT_PATH}?{query}",
+        None,
+        "protobuf",
+        TrackKind.DANMAKU,
+    )
+
+
+def danmaku_request(
+    ref: WorkRef,
+    session: Session,
+    *,
+    cid: int,
+    aid: int | None = None,
+    segment: int | None = None,
+) -> Request:
+    """Request description for danmaku; the bot performs it and hands the bytes to biliass."""
+    if ref.platform != "bilibili":
+        raise ValueError(f"{ref.platform} is not bilibili")
+    track = danmaku_track(cid, aid=aid, segment=segment)
+    return Request("GET", track.url, headers=default_headers(), cookies=dict(session.cookies))
+
+
+def subtitle_request(track: Track, session: Session) -> Request:
+    """Subtitle URLs are signed; the bot only has to send the player headers with them."""
+    if track.kind != TrackKind.SUBTITLE:
+        raise ValueError(f"{track.kind} is not a subtitle track")
+    return Request("GET", track.url, headers=default_headers(), cookies=dict(session.cookies))
+
+
 def ticket_request(ts: int) -> Request:
     """`GenWebTicket`, signed the way the web player signs it."""
     sign = hmac.new(TICKET_KEY, f"ts{ts}".encode(), hashlib.sha256).hexdigest()
@@ -138,6 +197,65 @@ def _expect_ok(body: dict) -> dict:
     if code != 0:
         raise ApiError(code, body.get("message") or "")
     return body.get("data") or {}
+
+
+def _absolute(url: str) -> str | None:
+    """Bilibili publishes protocol-relative CDN URLs; anything else non-http is dropped."""
+    if url.startswith("//"):
+        return f"https:{url}"
+    return url if url.startswith(("http://", "https://")) else None
+
+
+def subtitle_tracks(data: dict) -> tuple[Track, ...]:
+    """Subtitles the body actually publishes, in the order it published them.
+
+    Two shapes exist in the wild: a ``subtitle`` object with ``subtitles``
+    (``x/player/v2``) and a plain ``subtitle`` list (a bangumi view body). Both are read;
+    an absent or unrecognised value yields no tracks instead of a guess.
+    """
+    raw = data.get("subtitle")
+    if isinstance(raw, dict):
+        entries = raw.get("subtitles") or raw.get("list") or []
+    elif isinstance(raw, list):
+        entries = raw
+    else:
+        return ()
+    tracks: list[Track] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        url = entry.get("subtitle_url") or entry.get("url")
+        if not isinstance(url, str):
+            continue
+        absolute = _absolute(url)
+        if absolute is None:
+            continue
+        lang = entry.get("lan") or entry.get("lang")
+        fmt = entry.get("format")
+        if not fmt:
+            fmt = "json" if absolute.split("?", 1)[0].endswith(".json") else None
+        tracks.append(
+            Track(
+                absolute,
+                str(lang) if lang else None,
+                str(fmt) if fmt else None,
+                TrackKind.SUBTITLE,
+            )
+        )
+    return tuple(tracks)
+
+
+def _merge_tracks(*groups: tuple[Track, ...]) -> tuple[Track, ...]:
+    """Keep one copy per URL, preserving body order before caller-supplied tracks."""
+    seen: set[str] = set()
+    merged: list[Track] = []
+    for group in groups:
+        for track in group:
+            if track.url in seen:
+                continue
+            seen.add(track.url)
+            merged.append(track)
+    return tuple(merged)
 
 
 def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
@@ -172,54 +290,91 @@ def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
         thumbnail_url=pic if isinstance(pic, str) and pic.startswith("http") else None,
         parts=tuple(pages),
         canonical_url=canonical,
+        tracks=subtitle_tracks(data),
     )
 
 
-def pick_video_stream(dash: dict) -> Stream:
-    streams = dash.get("video") or []
-    if not streams:
-        raise ApiError(-1, "no video streams")
-    avc = [s for s in streams if s.get("codecid") == AVC_CODEC_ID]
-    chosen = max(avc or streams, key=lambda s: (s.get("id", 0), s.get("bandwidth", 0)))
-    return _stream(chosen)
+def pick_video_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
+    """The policy's video choice from a DASH object; kept for callers that hold one."""
+    streams = [_stream(raw) for raw in dash.get("video") or [] if isinstance(raw, dict)]
+    chosen = select_video(streams, policy)
+    if chosen is None:
+        raise ApiError(-1, "no video streams within policy")
+    return chosen
 
 
-def pick_audio_stream(dash: dict) -> Stream:
-    streams = dash.get("audio") or []
-    if not streams:
+def pick_audio_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
+    streams = [_stream(raw) for raw in dash.get("audio") or [] if isinstance(raw, dict)]
+    chosen = select_audio(streams, policy)
+    if chosen is None:
         raise ApiError(-1, "no audio track")
-    return _stream(max(streams, key=lambda s: s.get("bandwidth", 0)))
+    return chosen
 
 
 def _stream(raw: dict) -> Stream:
     base = raw.get("baseUrl") or raw.get("base_url") or ""
     backups = raw.get("backupUrl") or raw.get("backup_url") or []
+    quality_id = raw.get("id")
+    codec = str(raw.get("codecs") or "") or None
+    codec_id = raw.get("codecid")
+    if codec is None and isinstance(codec_id, int):
+        codec = CODEC_ID_FAMILIES.get(codec_id)
     return Stream(
         url=base,
         backup_urls=tuple(u for u in backups if u),
-        codec=str(raw.get("codecs") or "") or None,
+        codec=codec,
         bandwidth=int(raw.get("bandwidth") or 0),
         width=raw.get("width"),
         height=raw.get("height"),
+        quality_id=int(quality_id) if quality_id is not None else None,
     )
 
 
-def parse_playurl(body: dict, *, duration_s: float | None = None) -> StreamPlan:
-    """Price a DASH response: the chosen streams plus the bytes they will cost."""
+def _quality_label(data: dict, video: Stream | None) -> str:
+    if video is None:
+        return "audio"
+    quality_id = video.quality_id or int(data.get("quality") or 0)
+    name = QUALITY_NAMES.get(quality_id)
+    if name:
+        return name
+    if video.height:
+        return f"{video.width}x{video.height}" if video.width else f"{video.height}p"
+    return ""
+
+
+def parse_playurl(
+    body: dict,
+    *,
+    duration_s: float | None = None,
+    policy: Policy = DEFAULT_POLICY,
+    tracks: tuple[Track, ...] = (),
+) -> StreamPlan:
+    """Price a DASH response under ``policy``: chosen streams, bytes and sidecars.
+
+    ``tracks`` carries sidecars the caller already resolved (danmaku from a cid, for
+    example); subtitle tracks the body itself publishes are merged in first.
+    """
     data = _expect_ok(body)
     dash = data.get("dash") or {}
-    video = pick_video_stream(dash)
-    audio = pick_audio_stream(dash)
+    videos = [_stream(raw) for raw in dash.get("video") or [] if isinstance(raw, dict)]
+    audios = [_stream(raw) for raw in dash.get("audio") or [] if isinstance(raw, dict)]
+    video = select_video(videos, policy)
+    if video is None and not policy.audio_only:
+        raise ApiError(-1, "no video streams within policy")
+    audio = select_audio(audios, policy)
+    if audio is None:
+        raise ApiError(-1, "no audio track")
     seconds = float(dash.get("duration") or duration_s or 0)
-    estimated = int((video.bandwidth + audio.bandwidth) * seconds / 8) if seconds else 0
-    quality = QUALITY_NAMES.get(int(data.get("quality") or 0), "")
+    bandwidth = (video.bandwidth if video else 0) + audio.bandwidth
+    estimated = int(bandwidth * seconds / 8) if seconds else 0
     return StreamPlan(
         video=video,
         audio=audio,
         estimated_bytes=estimated,
-        quality=quality or f"{video.width}x{video.height}",
-        needs_merge=True,
+        quality=_quality_label(data, video),
+        needs_merge=video is not None,
         headers={"Referer": REFERER, "User-Agent": USER_AGENT},
+        tracks=_merge_tracks(subtitle_tracks(data), tracks),
     )
 
 
@@ -267,15 +422,15 @@ def _page(params: list[tuple[str, str]]) -> int | None:
 
 
 def parse(host: str, path: str, params: list[tuple[str, str]]) -> WorkRef | None:
+    page = _page(params)
     if host == "b23.tv":
         short_id = path.strip("/")
         if BV_RE.fullmatch(short_id):
-            return WorkRef(
-                "bilibili", "part" if _page(params) else "video", short_id, _page(params)
-            )
-        return WorkRef("bilibili", "short_link", short_id) if short_id else None
+            return WorkRef("bilibili", "part" if page else "video", short_id, page)
+        # A genuine short id is opaque, but the part the share sheet put beside it is
+        # not: carry it so expansion can restore the selection instead of part 1.
+        return WorkRef("bilibili", "short_link", short_id, page) if short_id else None
 
-    page = _page(params)
     episode = EPISODE_RE.search(path)
     if episode:
         return WorkRef("bilibili", "episode", episode.group(1).lower(), page)
@@ -297,7 +452,8 @@ def canonical(ref: WorkRef) -> str | None:
     if ref.kind == "short_link":
         raise NeedsExpansionError(f"b23.tv/{ref.work_id} must be expanded before use")
     if ref.kind in {"episode", "collection"}:
-        return f"https://www.bilibili.com/bangumi/play/{ref.work_id}"
+        link = f"https://www.bilibili.com/bangumi/play/{ref.work_id}"
+        return f"{link}?p={ref.part}" if ref.part else link
     link = f"https://www.bilibili.com/video/{ref.work_id}"
     return f"{link}?p={ref.part}" if ref.part else link
 

@@ -92,10 +92,35 @@ class MediaInfo:
     thumbnail_url: str | None = None
     parts: tuple[PartInfo, ...] = ()
     canonical_url: str = ""
+    tracks: tuple[Track, ...] = ()
 
     @property
     def is_multi_part(self) -> bool:
         return len(self.parts) > 1
+
+
+class TrackKind(StrEnum):
+    """What a sidecar file is. Conversion to a playable format stays in the bot."""
+
+    SUBTITLE = "subtitle"
+    DANMAKU = "danmaku"
+    CHAPTERS = "chapters"
+    THUMBNAIL = "thumbnail"
+
+
+@dataclass(frozen=True, slots=True)
+class Track:
+    """A sidecar the source published next to the media.
+
+    ``lang`` is the source's own label (``zh-CN``, ``ai-zh``) and stays ``None`` when
+    the source omitted it. ``format`` names the wire format (``json``, ``xml``,
+    ``protobuf``) so the bot can pick a converter without sniffing bytes.
+    """
+
+    url: str
+    lang: str | None = None
+    format: str | None = None
+    kind: TrackKind = TrackKind.SUBTITLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +131,7 @@ class Stream:
     bandwidth: int = 0
     width: int | None = None
     height: int | None = None
+    quality_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +144,7 @@ class StreamPlan:
     quality: str
     needs_merge: bool
     headers: Mapping[str, str] = field(default_factory=dict)
+    tracks: tuple[Track, ...] = ()
 
     @property
     def urls(self) -> tuple[str, ...]:
@@ -146,6 +173,15 @@ class Policy:
     show_source_link: bool = True
     store_metadata: bool = False
     source_label: str = "Source"
+    quality_max: str | None = None
+    codec_preference: tuple[str, ...] = ("avc1", "hevc", "av01")
+    audio_only: bool = False
+    part_padding: int = 0
+
+
+#: Selection defaults: highest AVC stream the source offers, simple ``[P2]`` names.
+#: A bot overrides only what it disagrees with; selection never reads capabilities.
+DEFAULT_POLICY = Policy(auto_preview=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,8 +209,8 @@ class Unavailable:
 
 @dataclass(frozen=True, slots=True)
 class Failure:
-    engine: str
-    version: str
+    """Why one engine failed. The engine id and version live on :class:`Attempt`."""
+
     reason: Reason
     detail: str = ""
 
