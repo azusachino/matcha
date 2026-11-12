@@ -38,7 +38,8 @@ and yt-dlp's argv. Both were the same missing abstraction: nothing owned the que
    multi-part work cannot overwrite its own part 1.
 9. One cid source. `PartInfo.cid` (and `MediaInfo.cid` for the selected part) comes from
    the `view` body, and `playurl_request` requires it: a request description cannot leave
-   the caller to patch a parameter it already had.
+   the caller to patch a parameter it already had. A body that publishes no pages at all
+   falls back to its own `cid`, which is part 1's and is never used over a page.
 
 ## Two policies, one pipeline
 
@@ -55,8 +56,8 @@ library while the other previews the best AVC stream the source offers.
 `Policy.auto_preview` is the one delivery decision, and it has no default: `None` means
 the policy has not made it. `SELECTION_DEFAULT` is the selection and naming default
 (`select_*`, `parse_playurl`, `filename_for`) and carries no decision, so `decide()`
-raises on it instead of reporting `MANUAL_POLICY` -- a bot's upload choice is stated,
-never inferred from absence.
+raises `PolicyError` on it instead of reporting `MANUAL_POLICY` -- a bot's upload choice
+is stated, never inferred from absence.
 
 ## Adding a platform
 

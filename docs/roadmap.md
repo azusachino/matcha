@@ -29,23 +29,35 @@ vocabulary, and a type-check gate.
 
 - **`playurl_request` requires `cid`.** The endpoint answers -400 without one even
   for a `bvid` link, so the keyword is required and always sent; a request
-  description no longer carries a blank placeholder for the caller to patch.
-  Read it from `MediaInfo.cid` (or `MediaInfo.selected_part.cid`) instead of
-  re-reading the `view` body: daphne's `_cid()` and its parameter surgery in
-  `_plan()` both go away.
+  description no longer carries a blank placeholder for the caller to patch. The
+  `cid` is authoritative: `page` is still sent as bookkeeping, and where a caller's
+  two values disagree the endpoint serves the cid's part (measured).
+  Read it from `MediaInfo.cid` instead of re-reading the `view` body, so daphne's
+  cid reader and the parameter surgery in `_plan()` both go away. **Keep daphne's
+  bounds check** (`"This video has N parts, not P"`) on `len(info.parts)`:
+  matcha reports an out-of-range part as `cid is None`, which a caller otherwise
+  reads as "the source published no cid" and turns "part 4 of 3" into a generic
+  card.
 - **`DEFAULT_POLICY` is now `SELECTION_DEFAULT`**, and `Policy.auto_preview` is
   `bool | None` defaulting to `None`. Selection and naming never read it, and
-  `deliver.decide()` raises `ValueError` on an unset policy rather than reporting
-  `MANUAL_POLICY` -- a consumer that used the old constant for `decide()` was
-  getting suzuran's product choice as its own. State `auto_preview` explicitly.
+  `deliver.decide()` raises `PolicyError` (a `MatchaError`, so a bot's existing
+  handler catches it) on an unset policy rather than reporting `MANUAL_POLICY` --
+  a consumer that used the old constant for `decide()` was getting suzuran's
+  product choice as its own. State `auto_preview` explicitly.
 - **`PartInfo.cid` and `MediaInfo.cid` are new** and additive; both stay `None`
-  when the source published no usable cid.
+  when the source published no usable cid. `parse_view` also carries the body's
+  own top-level `cid` (`MediaInfo.body_cid`), used only for a body that publishes
+  no pages at all: that number is part 1's cid even for a `?p=2` link (measured),
+  so it is never a fallback once a page exists.
 - **`TrackKind.CHAPTERS`/`TrackKind.THUMBNAIL` are reserved**, listed in
   `RESERVED_TRACK_KINDS`: no parser produces them, and a cover's one home is
-  `MediaInfo.thumbnail_url`.
-- **`expectation=` is typed against the caller's probe** (`Expectation[P]`), so a
+  `MediaInfo.thumbnail_url`. The list is documentary, not enforced -- the members
+  still construct -- so check it before branching on a kind.
+- **`expectation=` is typed against the caller's probe** (`Expectation[_P]`), so a
   bot's richer probe no longer only works by accident. `make check` now runs
-  mypy so the next such mismatch is caught instead of passing.
+  mypy, `py.typed` ships in the wheel so consumers see these types at all, and
+  `disallow_untyped_defs` is scoped to `matcha.*` (annotating the existing test
+  helpers is separate work).
 
 ## 0.2.0 migration notes
 
