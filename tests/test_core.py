@@ -219,9 +219,10 @@ def test_playurl_request_carries_the_cid_it_is_given():
 def test_playurl_request_carries_the_cid_for_a_legacy_aid_link():
     ref = parse("https://www.bilibili.com/video/av170001")
     assert ref is not None
-    params = dict(bilibili.playurl_request(ref, Session(), cid=170001).params)
+    params = dict(bilibili.playurl_request(ref, Session(), cid=77112233).params)
     assert params["aid"] == "170001"
-    assert params["cid"] == "170001"  # not the old blank placeholder the caller filled in
+    assert params["cid"] == "77112233"  # a cid is its own id, not the aid
+    assert "cid" in dict(bilibili.playurl_request(ref, Session(), cid=77112233).params)
 
 
 def test_playurl_request_refuses_an_absent_or_zero_cid():

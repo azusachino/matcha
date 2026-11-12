@@ -142,19 +142,18 @@ def check() -> list[str]:
     problems: list[str] = []
     for paste, platform, kind, work_id, part, start, expected in CASES:
         if platform is None:
-            stripped = strip_tracking(paste)
-            if stripped != expected:
-                problems.append(f"{paste!r} -> {stripped!r}, expected {expected!r}")
+            actual = strip_tracking(paste)
+            if actual != expected:
+                problems.append(f"{paste!r} -> {actual!r}, expected {expected!r}")
             continue
         ref = parse(paste)
         if ref is None:
             problems.append(f"{paste!r} did not parse")
             continue
-        actual = (ref.platform, ref.kind, ref.work_id, ref.part, ref.start)
-        if actual != (platform, kind, work_id, part, start):
-            problems.append(
-                f"{paste!r} -> {actual}, expected {(platform, kind, work_id, part, start)}"
-            )
+        observed = (ref.platform, ref.kind, ref.work_id, ref.part, ref.start)
+        declared = (platform, kind, work_id, part, start)
+        if observed != declared:
+            problems.append(f"{paste!r} -> {observed}, expected {declared}")
             continue
         produced = canonical_url(ref)
         if produced != expected:

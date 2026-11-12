@@ -41,7 +41,7 @@ class Probe:
 
 #: Bound once on both sides of ``is_complete``/``run_chain`` so an expectation written
 #: for a bot's richer probe stays assignable (see :data:`Expectation`).
-P = TypeVar("P", bound=ProbeLike)
+_P = TypeVar("_P", bound=ProbeLike)
 
 
 #: A question about the probe the caller actually produced. A
@@ -51,7 +51,7 @@ P = TypeVar("P", bound=ProbeLike)
 #: parameter. One TypeVar bound on both the probe and the expectation keeps the
 #: annotation honest -- the expectation is only ever called with the probe the same call
 #: produced.
-Expectation = Callable[[P], bool]
+Expectation = Callable[[_P], bool]
 
 
 class Engine(Protocol):
@@ -83,11 +83,11 @@ class ChainFailed(Exception):
 
 
 def is_complete(
-    probe: P,
+    probe: _P,
     expected_duration_s: float | None,
     *,
     tolerance: float = 0.25,
-    expectation: Expectation[P] | None = None,
+    expectation: Expectation[_P] | None = None,
 ) -> bool:
     """A file is complete when it exists, is not a stub, and meets the expectation.
 
@@ -110,9 +110,9 @@ def is_complete(
 def run_chain(
     engines: Iterable[Engine],
     *,
-    probe: Callable[[str], P] | None = None,
+    probe: Callable[[str], _P] | None = None,
     expected_duration_s: float | None = None,
-    expectation: Expectation[P] | None = None,
+    expectation: Expectation[_P] | None = None,
     log: Callable[[Attempt], None] | None = None,
 ) -> ChainResult:
     """Try engines in order; the first complete result wins, every attempt is kept."""
