@@ -26,7 +26,7 @@ from matcha import (
     parse,
 )
 from matcha.chain import ChainFailed, Expectation, Probe, ProbeLike, is_complete, run_chain
-from matcha.errors import NeedsExpansionError
+from matcha.errors import MatchaError, NeedsExpansionError, PolicyError
 from matcha.link import with_expanded
 
 BV = "BV1aMEj62EdA"
@@ -313,10 +313,13 @@ def test_decide_refuses_a_policy_with_no_delivery_decision():
         video=None, audio=None, estimated_bytes=10**6, quality="480p", needs_merge=True
     )
     caps = Capabilities(max_upload_bytes=50 * 10**6)
-    with pytest.raises(ValueError):
+    with pytest.raises(PolicyError):
         decide(INFO, plan, caps, SELECTION_DEFAULT)
-    with pytest.raises(ValueError):
+    with pytest.raises(PolicyError):
         decide(INFO, None, caps, Policy())
+    # A bot's sink already catches MatchaError; an unset policy must not escape it.
+    with pytest.raises(MatchaError):
+        decide(INFO, plan, caps, Policy())
 
 
 def test_delivery_reports_permission_before_a_missing_plan():

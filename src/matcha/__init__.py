@@ -8,7 +8,7 @@ metadata parsing, engine chaining and delivery decision come from here.
 from __future__ import annotations
 
 from .deliver import decide
-from .errors import ApiError, MatchaError, NeedsExpansionError
+from .errors import ApiError, MatchaError, NeedsExpansionError, PolicyError
 from .link import cache_key, canonical_url, normalize_text, parse, strip_tracking, with_expanded
 from .naming import extension_for, filename_for, slugify
 from .platforms import bilibili, youtube
@@ -56,6 +56,7 @@ __all__ = [
     "NeedsExpansionError",
     "PartInfo",
     "Policy",
+    "PolicyError",
     "Reason",
     "Request",
     "Session",

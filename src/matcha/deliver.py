@@ -9,6 +9,7 @@ unset cannot deliver at all.
 
 from __future__ import annotations
 
+from .errors import PolicyError
 from .types import (
     Capabilities,
     Card,
@@ -35,11 +36,12 @@ def decide(
     that policy had already forbidden.
 
     A policy whose ``auto_preview`` is ``None`` has made no decision, and this raises
-    instead of reporting ``MANUAL_POLICY``: a selection default must not be read as "this
-    bot chose a human", which would put an invented intent in a user-visible card.
+    :class:`~matcha.errors.PolicyError` instead of reporting ``MANUAL_POLICY``: a selection
+    default must not be read as "this bot chose a human", which would put an invented
+    intent in a user-visible card.
     """
     if policy.auto_preview is None:
-        raise ValueError("policy makes no delivery decision; set Policy.auto_preview")
+        raise PolicyError()
     if not policy.auto_preview:
         return Card(Reason.MANUAL_POLICY)
     if not caps.preview_allowed:
