@@ -15,8 +15,10 @@ from matcha import (
     MediaInfo,
     Policy,
     Reason,
+    Session,
     StreamPlan,
     Upload,
+    WorkRef,
     bilibili,
     canonical_url,
     conformance,
@@ -125,6 +127,88 @@ def test_parse_view_rejects_error_codes():
         bilibili.parse_view(
             {"code": -404, "message": "啥都木有"}, parse("https://b23.tv/BV1aMEj62EdA")
         )
+
+
+def test_parse_view_carries_each_parts_cid():
+    """The cid belongs to the part, so no caller has to re-read the view body for it."""
+    ref = parse(f"https://www.bilibili.com/video/{BV}?p=2")
+    assert ref is not None
+    info = bilibili.parse_view(VIEW, ref)
+    assert [part.cid for part in info.parts] == [38979504395, 39558775483]
+    assert info.selected_part is info.parts[1]
+    assert info.cid == 39558775483
+
+
+def test_selected_part_falls_back_to_the_first_page_only_when_none_was_chosen():
+    no_part = bilibili.parse_view(VIEW, WorkRef("bilibili", "video", BV))
+    assert no_part.selected_part is no_part.parts[0]
+    assert no_part.cid == 38979504395
+    # A part the body does not publish is ``None``, not a silent page 1.
+    missing = bilibili.parse_view(VIEW, WorkRef("bilibili", "part", BV, 5))
+    assert missing.selected_part is None and missing.cid is None
+
+
+def test_parse_view_keeps_an_unusable_cid_absent():
+    body = {
+        "code": 0,
+        "data": {
+            "title": "t",
+            "pages": [
+                {"page": 1, "part": "a", "cid": ""},
+                {"page": 2, "part": "b", "cid": "not-a-number"},
+                {"page": 3, "part": "c"},
+            ],
+        },
+    }
+    info = bilibili.parse_view(body, WorkRef("bilibili", "video", BV))
+    assert [part.cid for part in info.parts] == [None, None, None]
+    assert info.cid is None
+
+
+def test_parse_pagelist_carries_cids():
+    body = {"code": 0, "data": {"pages": [{"page": 1, "part": "a", "cid": 42}]}}
+    assert bilibili.parse_pagelist(body)[0].cid == 42
+
+
+def test_playurl_request_carries_the_cid_it_is_given():
+    """``playurl`` answers -400 without a cid, for a bvid link too (measured live)."""
+    ref = parse(f"https://www.bilibili.com/video/{BV}?p=2")
+    assert ref is not None
+    request = bilibili.playurl_request(
+        ref, Session({"SESSDATA": "secret"}), cid=39558775483, qn=120
+    )
+    params = dict(request.params)
+    assert params["cid"] == "39558775483"
+    assert params["bvid"] == BV and params["page"] == "2"
+    assert params["fnval"] == "4048" and params["qn"] == "120"
+    assert request.url.endswith("/x/player/playurl")
+    assert request.cookies == {"SESSDATA": "secret"}
+
+
+def test_playurl_request_carries_the_cid_for_a_legacy_aid_link():
+    ref = parse("https://www.bilibili.com/video/av170001")
+    assert ref is not None
+    params = dict(bilibili.playurl_request(ref, Session(), cid=170001).params)
+    assert params["aid"] == "170001"
+    assert params["cid"] == "170001"  # not the old blank placeholder the caller filled in
+
+
+def test_playurl_request_refuses_an_absent_or_zero_cid():
+    ref = parse(f"https://www.bilibili.com/video/{BV}")
+    assert ref is not None
+    with pytest.raises(TypeError):
+        bilibili.playurl_request(ref, Session())  # type: ignore[call-arg]
+    with pytest.raises(ValueError):
+        bilibili.playurl_request(ref, Session(), cid=0)
+
+
+def test_view_cid_feeds_the_playurl_request_without_a_second_read():
+    ref = parse(f"https://www.bilibili.com/video/{BV}?p=2")
+    assert ref is not None
+    info = bilibili.parse_view(VIEW, ref)
+    assert info.cid is not None
+    params = dict(bilibili.playurl_request(ref, Session(), cid=info.cid).params)
+    assert params["cid"] == "39558775483"
 
 
 PLAYURL = {

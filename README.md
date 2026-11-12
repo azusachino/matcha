@@ -36,6 +36,9 @@ and yt-dlp's argv. Both were the same missing abstraction: nothing owned the que
    hardcodes a codec, and no bot needs its own format fork.
 8. One namer. `filename_for(ref, info, policy)` is the only filename producer, so a
    multi-part work cannot overwrite its own part 1.
+9. One cid source. `PartInfo.cid` (and `MediaInfo.cid` for the selected part) comes from
+   the `view` body, and `playurl_request` requires it: a request description cannot leave
+   the caller to patch a parameter it already had.
 
 ## Two policies, one pipeline
 

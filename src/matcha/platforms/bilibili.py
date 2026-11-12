@@ -91,9 +91,19 @@ def view_request(ref: WorkRef, session: Session) -> Request:
     )
 
 
-def playurl_request(ref: WorkRef, session: Session, *, qn: int = 80) -> Request:
+def playurl_request(ref: WorkRef, session: Session, *, cid: int, qn: int = 80) -> Request:
+    """The DASH plan request for one part.
+
+    ``cid`` is required, not optional: the endpoint answers -400 without it even for a
+    ``bvid`` link (measured live), so a description that leaves it to the caller is a
+    description that fails. The value comes from the ``view`` body the caller has already
+    read -- :attr:`MediaInfo.cid` for the selected part -- so nothing here re-reads it.
+    """
+    if cid < 1:
+        raise ValueError("cid must be the part's positive player id")
     params = {
         **api_params(ref),
+        "cid": str(cid),
         "fnval": str(FNVAL_DASH),
         "fnver": "0",
         "fourk": "1",
@@ -101,8 +111,6 @@ def playurl_request(ref: WorkRef, session: Session, *, qn: int = 80) -> Request:
     }
     if ref.part:
         params["page"] = str(ref.part)
-    if "aid" in params:
-        params["cid"] = ""  # filled by the caller from view(); keeps the request honest
     return Request(
         "GET",
         f"{API_BASE}/x/player/playurl",
@@ -258,6 +266,17 @@ def _merge_tracks(*groups: tuple[Track, ...]) -> tuple[Track, ...]:
     return tuple(merged)
 
 
+def _page_cid(page: dict) -> int | None:
+    """A page's ``cid``, or ``None``: a placeholder would address the wrong part."""
+    value = page.get("cid")
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
     """Read a `view` body. Fields the source omits stay ``None``, never a placeholder."""
     data = _expect_ok(body)
@@ -266,6 +285,7 @@ def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
             index=int(page.get("page") or index + 1),
             title=str(page.get("part") or ""),
             duration_s=float(page["duration"]) if page.get("duration") else None,
+            cid=_page_cid(page),
         )
         for index, page in enumerate(data.get("pages") or [])
     ]
@@ -392,6 +412,7 @@ def parse_pagelist(body: dict) -> tuple[PartInfo, ...]:
             index=int(page.get("page") or index + 1),
             title=str(page.get("part") or ""),
             duration_s=float(page["duration"]) if page.get("duration") else None,
+            cid=_page_cid(page),
         )
         for index, page in enumerate(_expect_ok(body).get("pages") or [])
         if isinstance(page, dict)

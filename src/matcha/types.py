@@ -67,9 +67,17 @@ class Request:
 
 @dataclass(frozen=True, slots=True)
 class PartInfo:
+    """One part (page) of a work, as the source published it.
+
+    ``cid`` is the part's player id, the identifier ``playurl`` and the danmaku endpoints
+    actually address. It stays ``None`` when the source omitted it, so a caller that
+    needs one treats that as "no plan", not as zero.
+    """
+
     index: int
     title: str
     duration_s: float | None = None
+    cid: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,9 +106,34 @@ class MediaInfo:
     def is_multi_part(self) -> bool:
         return len(self.parts) > 1
 
+    @property
+    def selected_part(self) -> PartInfo | None:
+        """The part this info describes: the matched page, else the first, else none.
+
+        ``parse_view`` already reads the selected part's duration; this exposes the same
+        page -- with its ``cid`` -- so a caller needs no second read of the view body.
+        A part that the body does not publish yields ``None`` instead of page 1.
+        """
+        if not self.parts:
+            return None
+        if self.part is None:
+            return self.parts[0]
+        return next((page for page in self.parts if page.index == self.part), None)
+
+    @property
+    def cid(self) -> int | None:
+        """The selected part's cid, which is what ``playurl_request`` needs."""
+        part = self.selected_part
+        return None if part is None else part.cid
+
 
 class TrackKind(StrEnum):
-    """What a sidecar file is. Conversion to a playable format stays in the bot."""
+    """What a sidecar file is. Conversion to a playable format stays in the bot.
+
+    A kind belongs here once a parser under ``platforms/`` produces it. Vocabulary that
+    nothing produces is listed in :data:`RESERVED_TRACK_KINDS` instead, so a bot cannot
+    write a branch for a track that never arrives.
+    """
 
     SUBTITLE = "subtitle"
     DANMAKU = "danmaku"
