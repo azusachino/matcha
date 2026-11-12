@@ -178,9 +178,14 @@ class Policy:
     suzuran keeps a private library, so it previews nothing automatically, redacts its
     own identifiers too, hides the source link and stores metadata. daphne converts in
     chat, so it previews small files and shows the canonical source.
+
+    ``auto_preview`` is the one *delivery* decision. ``None`` means this policy has not
+    made it -- which is what a policy built for selection or naming looks like. Selection
+    and naming never read it; :func:`matcha.deliver.decide` refuses it rather than turn an
+    unstated decision into a card.
     """
 
-    auto_preview: bool
+    auto_preview: bool | None = None
     redact_personal: bool = False
     show_source_link: bool = True
     store_metadata: bool = False
@@ -191,9 +196,11 @@ class Policy:
     part_padding: int = 0
 
 
-#: Selection defaults: highest AVC stream the source offers, simple ``[P2]`` names.
-#: A bot overrides only what it disagrees with; selection never reads capabilities.
-DEFAULT_POLICY = Policy(auto_preview=False)
+#: Selection and naming defaults: the highest stream the source offers with the preferred
+#: codec first, and simple ``[P2]`` names. Deliberately carries no delivery decision
+#: (``auto_preview`` is ``None``), because a bot's upload choice is not a default; state
+#: it explicitly before calling :func:`matcha.deliver.decide`.
+SELECTION_DEFAULT = Policy()
 
 
 @dataclass(frozen=True, slots=True)

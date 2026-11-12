@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .types import DEFAULT_POLICY, MediaInfo, Policy, WorkRef
+from .types import SELECTION_DEFAULT, MediaInfo, Policy, WorkRef
 
 #: Characters no common filesystem accepts. They become spaces, not underscores:
 #: ``"a/b"`` reads as ``"a b"``, which is what a title meant.
@@ -113,7 +113,7 @@ def _part_suffix(part: int, padding: int) -> str:
 def filename_for(
     ref: WorkRef,
     info: MediaInfo,
-    policy: Policy = DEFAULT_POLICY,
+    policy: Policy = SELECTION_DEFAULT,
     *,
     content_type: str | None = None,
 ) -> str:

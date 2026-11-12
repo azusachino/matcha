@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from .types import Policy, Stream
+from .types import SELECTION_DEFAULT, Policy, Stream
 
 #: Height for each quality label Bilibili and yt-dlp use. Unknown labels fail loudly
 #: rather than silently uncapping the download.
@@ -81,7 +81,7 @@ def _rank(stream: Stream, preference: tuple[str, ...]) -> int:
     return preference.index(family) if family in preference else len(preference)
 
 
-def select_video(streams: Sequence[Stream], policy: Policy) -> Stream | None:
+def select_video(streams: Sequence[Stream], policy: Policy = SELECTION_DEFAULT) -> Stream | None:
     """Pick one video stream: quality cap first, then codec preference, then quality.
 
     Codec preference is a priority, not a tie-breaker: a preferred 480p stream beats an
@@ -112,7 +112,7 @@ def select_video(streams: Sequence[Stream], policy: Policy) -> Stream | None:
     )
 
 
-def select_audio(streams: Sequence[Stream], policy: Policy) -> Stream | None:
+def select_audio(streams: Sequence[Stream], policy: Policy = SELECTION_DEFAULT) -> Stream | None:
     """Pick one audio stream: codec preference, then the highest bandwidth."""
     if not streams:
         return None

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from matcha import (
+    SELECTION_DEFAULT,
     ApiError,
     Capabilities,
     Card,
@@ -189,6 +190,18 @@ def test_policy_not_capability_decides():
     assert decide(INFO, big, caps, Policy(auto_preview=True)) == Card(Reason.TOO_LARGE)
     blocked = Capabilities(max_upload_bytes=50 * 10**6, preview_allowed=False)
     assert decide(INFO, plan, blocked, Policy(auto_preview=True)) == Card(Reason.NO_ACCESS)
+
+
+def test_decide_refuses_a_policy_with_no_delivery_decision():
+    """A selection default must not be read as "this bot chose a human"."""
+    plan = StreamPlan(
+        video=None, audio=None, estimated_bytes=10**6, quality="480p", needs_merge=True
+    )
+    caps = Capabilities(max_upload_bytes=50 * 10**6)
+    with pytest.raises(ValueError):
+        decide(INFO, plan, caps, SELECTION_DEFAULT)
+    with pytest.raises(ValueError):
+        decide(INFO, None, caps, Policy())
 
 
 def test_delivery_reports_permission_before_a_missing_plan():

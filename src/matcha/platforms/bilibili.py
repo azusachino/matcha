@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 from ..errors import ApiError, NeedsExpansionError
 from ..select import select_audio, select_video
 from ..types import (
-    DEFAULT_POLICY,
+    SELECTION_DEFAULT,
     MediaInfo,
     PartInfo,
     Policy,
@@ -294,7 +294,7 @@ def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
     )
 
 
-def pick_video_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
+def pick_video_stream(dash: dict, policy: Policy = SELECTION_DEFAULT) -> Stream:
     """The policy's video choice from a DASH object; kept for callers that hold one."""
     streams = [_stream(raw) for raw in dash.get("video") or [] if isinstance(raw, dict)]
     chosen = select_video(streams, policy)
@@ -303,7 +303,7 @@ def pick_video_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
     return chosen
 
 
-def pick_audio_stream(dash: dict, policy: Policy = DEFAULT_POLICY) -> Stream:
+def pick_audio_stream(dash: dict, policy: Policy = SELECTION_DEFAULT) -> Stream:
     streams = [_stream(raw) for raw in dash.get("audio") or [] if isinstance(raw, dict)]
     chosen = select_audio(streams, policy)
     if chosen is None:
@@ -353,7 +353,7 @@ def parse_playurl(
     body: dict,
     *,
     duration_s: float | None = None,
-    policy: Policy = DEFAULT_POLICY,
+    policy: Policy = SELECTION_DEFAULT,
     tracks: tuple[Track, ...] = (),
 ) -> StreamPlan:
     """Price a DASH response under ``policy``: chosen streams, bytes and sidecars.

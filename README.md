@@ -49,6 +49,12 @@ The same object also selects and names: `quality_max`, `codec_preference`,
 `audio_only` and `part_padding` are policy values, so one bot can keep a 480p HEVC
 library while the other previews the best AVC stream the source offers.
 
+`Policy.auto_preview` is the one delivery decision, and it has no default: `None` means
+the policy has not made it. `SELECTION_DEFAULT` is the selection and naming default
+(`select_*`, `parse_playurl`, `filename_for`) and carries no decision, so `decide()`
+raises on it instead of reporting `MANUAL_POLICY` -- a bot's upload choice is stated,
+never inferred from absence.
+
 ## Adding a platform
 
 Add `src/matcha/platforms/<name>.py` exposing a `SPEC = PlatformSpec(...)` with

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from matcha import DEFAULT_POLICY, ApiError, Policy, Stream, bilibili
+from matcha import SELECTION_DEFAULT, ApiError, Policy, Stream, bilibili
 from matcha.select import codec_family, max_height, select_audio, select_video
 
 STREAMS = (
@@ -68,9 +68,20 @@ def test_codec_families_accept_the_strings_sources_publish():
     assert codec_family(None) is None
 
 
-def test_default_policy_keeps_the_old_avc_first_choice():
-    chosen = select_video(STREAMS, DEFAULT_POLICY)
+def test_selection_default_keeps_the_old_avc_first_choice():
+    chosen = select_video(STREAMS, SELECTION_DEFAULT)
     assert chosen is not None and chosen.url == "avc-1080"
+
+
+def test_selection_default_makes_no_delivery_decision():
+    """The default for selection and naming is not a policy for ``decide()``."""
+    assert SELECTION_DEFAULT.auto_preview is None
+    assert SELECTION_DEFAULT.quality_max is None
+    assert SELECTION_DEFAULT.codec_preference == ("avc1", "hevc", "av01")
+    assert SELECTION_DEFAULT.audio_only is False
+    assert SELECTION_DEFAULT.part_padding == 0
+    # Selection does not read delivery fields, so the neutral default selects normally.
+    assert select_video(STREAMS) == select_video(STREAMS, SELECTION_DEFAULT)
 
 
 def test_quality_max_caps_before_quality():
@@ -113,14 +124,14 @@ def test_without_avc_the_next_preference_wins_even_at_lower_height():
         height=1080,
         quality_id=80,
     )
-    chosen = select_video((av1_1080, hevc_480), DEFAULT_POLICY)
+    chosen = select_video((av1_1080, hevc_480), SELECTION_DEFAULT)
     assert chosen is not None and chosen.url == "hevc-480"
 
 
 def test_without_a_preferred_codec_av1_beats_an_unlisted_codec():
     av1 = Stream(url="av1", codec="av01.0.08M.08", bandwidth=1_000_000, height=1080)
     unlisted = Stream(url="vp9", codec="vp09.00.10.08", bandwidth=2_000_000, height=1080)
-    chosen = select_video((unlisted, av1), DEFAULT_POLICY)
+    chosen = select_video((unlisted, av1), SELECTION_DEFAULT)
     assert chosen is not None and chosen.url == "av1"
 
 
@@ -145,9 +156,9 @@ def test_audio_only_chooses_no_video():
 
 
 def test_audio_picks_the_highest_bandwidth():
-    chosen = select_audio(AUDIO, DEFAULT_POLICY)
+    chosen = select_audio(AUDIO, SELECTION_DEFAULT)
     assert chosen is not None and chosen.url == "aac-192"
-    assert select_audio((), DEFAULT_POLICY) is None
+    assert select_audio((), SELECTION_DEFAULT) is None
 
 
 PLAYURL = {

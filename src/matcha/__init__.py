@@ -14,8 +14,8 @@ from .naming import extension_for, filename_for, slugify
 from .platforms import bilibili, youtube
 from .select import codec_family, max_height, select_audio, select_video
 from .types import (
-    DEFAULT_POLICY,
     RESERVED_TRACK_KINDS,
+    SELECTION_DEFAULT,
     Attempt,
     Capabilities,
     Card,
@@ -41,8 +41,8 @@ from .types import (
 __version__ = "0.2.0"
 
 __all__ = [
-    "DEFAULT_POLICY",
     "RESERVED_TRACK_KINDS",
+    "SELECTION_DEFAULT",
     "ApiError",
     "Attempt",
     "Capabilities",

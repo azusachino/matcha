@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from matcha import DEFAULT_POLICY, MediaInfo, Policy, WorkRef
+from matcha import SELECTION_DEFAULT, MediaInfo, Policy, WorkRef
 from matcha.naming import MAX_STEM_BYTES, extension_for, filename_for, slugify
 
 BV = "BV1aMEj62EdA"
@@ -120,5 +120,9 @@ def test_an_empty_title_falls_back_to_the_work_id():
     assert filename_for(ref, info("")) == f"{BV}.mp4"
 
 
-def test_default_policy_names_simply():
-    assert DEFAULT_POLICY.part_padding == 0
+def test_selection_default_names_simply():
+    """Naming reads ``part_padding`` and nothing from the delivery half of the policy."""
+    assert SELECTION_DEFAULT.part_padding == 0
+    assert SELECTION_DEFAULT.auto_preview is None
+    ref = WorkRef("bilibili", "part", BV, 12)
+    assert filename_for(ref, info("t"), SELECTION_DEFAULT) == "t [P12].mp4"
