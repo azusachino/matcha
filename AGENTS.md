@@ -14,4 +14,4 @@ socket or a file, it belongs in the consuming bot.
 
 ## Gates
 
-`make check` (ruff format --check, ruff check, pytest) before any commit.
+`make check` (ruff format --check, ruff check, mypy, pytest) before any commit.

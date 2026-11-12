@@ -10,8 +10,11 @@ from __future__ import annotations
 from .link import canonical_url, parse
 
 BV = "BV1aMEj62EdA"
+#: paste, platform, kind, work_id, part, start, canonical. An unclaimed paste leaves the
+#: platform fields empty, and the row still has to fit this shape.
+Case = tuple[str, str | None, str | None, str | None, int | None, int | None, str]
 # (paste, expected platform, kind, work_id, part, start, canonical)
-CASES: tuple[tuple[str, str, str, str, int | None, int | None, str], ...] = (
+CASES: tuple[Case, ...] = (
     (
         f"https://www.bilibili.com/video/{BV}",
         "bilibili",
@@ -139,9 +142,9 @@ def check() -> list[str]:
     problems: list[str] = []
     for paste, platform, kind, work_id, part, start, expected in CASES:
         if platform is None:
-            actual = strip_tracking(paste)
-            if actual != expected:
-                problems.append(f"{paste!r} -> {actual!r}, expected {expected!r}")
+            stripped = strip_tracking(paste)
+            if stripped != expected:
+                problems.append(f"{paste!r} -> {stripped!r}, expected {expected!r}")
             continue
         ref = parse(paste)
         if ref is None:

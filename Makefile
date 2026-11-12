@@ -1,6 +1,6 @@
-.PHONY: check fmt lint test build
+.PHONY: check fmt lint types test build
 
-check: fmt-check lint test
+check: fmt-check lint types test
 
 fmt:
 	uv run ruff format src tests
@@ -10,6 +10,9 @@ fmt-check:
 
 lint:
 	uv run ruff check src tests
+
+types:
+	uv run mypy
 
 test:
 	uv run pytest

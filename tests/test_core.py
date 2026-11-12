@@ -123,10 +123,15 @@ def test_parse_view_keeps_absent_fields_absent():
 
 
 def test_parse_view_rejects_error_codes():
-    with pytest.raises(ApiError):
-        bilibili.parse_view(
-            {"code": -404, "message": "啥都木有"}, parse("https://b23.tv/BV1aMEj62EdA")
-        )
+    ref = parse("https://b23.tv/BV1aMEj62EdA")
+    assert ref is not None
+    with pytest.raises(ApiError) as caught:
+        bilibili.parse_view({"code": -404, "message": "啥都木有"}, ref)
+    assert caught.value.code == -404
+    # A body with no numeric code is not the platform's own refusal.
+    with pytest.raises(ApiError) as garbled:
+        bilibili.parse_view({"code": None, "message": ""}, WorkRef("bilibili", "video", BV))
+    assert garbled.value.code == -1
 
 
 def test_parse_view_carries_each_parts_cid():

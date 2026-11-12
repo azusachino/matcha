@@ -67,5 +67,5 @@ Add `src/matcha/platforms/<name>.py` exposing a `SPEC = PlatformSpec(...)` with
 ## Gates
 
 ```bash
-make check    # ruff format --check, ruff check, pytest
+make check    # ruff format --check, ruff check, mypy, pytest
 ```

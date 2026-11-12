@@ -201,9 +201,14 @@ def expand_request(ref: WorkRef) -> Request:
 
 
 def _expect_ok(body: dict) -> dict:
+    """The ``data`` of a successful body, or the platform's refusal as an :class:`ApiError`.
+
+    A body without a numeric ``code`` is not a platform refusal, so it is reported as
+    ``-1`` (matcha's own "the payload made no sense") rather than as a fabricated code.
+    """
     code = body.get("code")
     if code != 0:
-        raise ApiError(code, body.get("message") or "")
+        raise ApiError(code if isinstance(code, int) else -1, str(body.get("message") or ""))
     return body.get("data") or {}
 
 
