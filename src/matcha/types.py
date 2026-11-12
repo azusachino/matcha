@@ -101,6 +101,10 @@ class MediaInfo:
     parts: tuple[PartInfo, ...] = ()
     canonical_url: str = ""
     tracks: tuple[Track, ...] = ()
+    # The body's own top-level ``cid``, when it published one. It names part 1 whatever
+    # part was asked for (measured: a ``?p=2`` link still carries part 1's cid here), so
+    # :attr:`cid` uses it only for a body that published no pages at all.
+    body_cid: int | None = None
 
     @property
     def is_multi_part(self) -> bool:
@@ -108,11 +112,11 @@ class MediaInfo:
 
     @property
     def selected_part(self) -> PartInfo | None:
-        """The part this info describes: the matched page, else the first, else none.
+        """The page this info is about, so a caller needs no second read of the body.
 
-        ``parse_view`` already reads the selected part's duration; this exposes the same
-        page -- with its ``cid`` -- so a caller needs no second read of the view body.
-        A part that the body does not publish yields ``None`` instead of page 1.
+        With no part selected, that is the body's first page. With ``part`` set, it is
+        that page -- and ``None`` when the body does not publish it, never a silent page
+        1. ``parse_view`` reads its duration from the same page.
         """
         if not self.parts:
             return None
@@ -122,7 +126,14 @@ class MediaInfo:
 
     @property
     def cid(self) -> int | None:
-        """The selected part's cid, which is what ``playurl_request`` needs."""
+        """The cid ``playurl_request`` needs: the selected part's, or the body's own.
+
+        A body that published no pages at all falls back to its top-level ``cid``, since
+        that is the only cid it offers. Once a page exists the fallback is never used:
+        that cid belongs to part 1 even when another part was selected.
+        """
+        if not self.parts:
+            return self.body_cid
         part = self.selected_part
         return None if part is None else part.cid
 

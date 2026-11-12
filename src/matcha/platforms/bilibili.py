@@ -98,6 +98,10 @@ def playurl_request(ref: WorkRef, session: Session, *, cid: int, qn: int = 80) -
     ``bvid`` link (measured live), so a description that leaves it to the caller is a
     description that fails. The value comes from the ``view`` body the caller has already
     read -- :attr:`MediaInfo.cid` for the selected part -- so nothing here re-reads it.
+
+    ``cid`` is authoritative and ``page`` is bookkeeping: where a caller's values disagree,
+    the endpoint serves the cid's part (measured: part 1's cid with ``page=2`` returns part
+    1's stream), which is why the cid is the required argument.
     """
     if cid < 1:
         raise ValueError("cid must be the part's positive player id")
@@ -271,9 +275,10 @@ def _merge_tracks(*groups: tuple[Track, ...]) -> tuple[Track, ...]:
     return tuple(merged)
 
 
-def _page_cid(page: dict) -> int | None:
-    """A page's ``cid``, or ``None``: a placeholder would address the wrong part."""
-    value = page.get("cid")
+def _published_cid(body_or_page: dict) -> int | None:
+    """The ``cid`` a page or a body publishes, or ``None``: a placeholder addresses the
+    wrong part."""
+    value = body_or_page.get("cid")
     if isinstance(value, bool) or value is None:
         return None
     try:
@@ -290,10 +295,15 @@ def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
             index=int(page.get("page") or index + 1),
             title=str(page.get("part") or ""),
             duration_s=float(page["duration"]) if page.get("duration") else None,
-            cid=_page_cid(page),
+            cid=_published_cid(page),
         )
         for index, page in enumerate(data.get("pages") or [])
     ]
+    # A body that publishes the cid only at ``data.cid`` would otherwise lose it, so that
+    # value is used as a fallback -- but *only* when the body publishes no pages at all.
+    # Measured: ``data.cid`` names part 1 even for a ``?p=2`` link, so an unguarded
+    # fallback would address part 1 for any part selection.
+    body_cid = _published_cid(data) if not pages else None
     owner = data.get("owner") or {}
     selected = None
     if ref.part and pages:
@@ -316,6 +326,7 @@ def parse_view(body: dict, ref: WorkRef, *, canonical: str = "") -> MediaInfo:
         parts=tuple(pages),
         canonical_url=canonical,
         tracks=subtitle_tracks(data),
+        body_cid=body_cid,
     )
 
 
@@ -417,7 +428,7 @@ def parse_pagelist(body: dict) -> tuple[PartInfo, ...]:
             index=int(page.get("page") or index + 1),
             title=str(page.get("part") or ""),
             duration_s=float(page["duration"]) if page.get("duration") else None,
-            cid=_page_cid(page),
+            cid=_published_cid(page),
         )
         for index, page in enumerate(_expect_ok(body).get("pages") or [])
         if isinstance(page, dict)

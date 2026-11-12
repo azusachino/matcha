@@ -88,7 +88,8 @@ def test_part_is_normalised():
     assert parse(f"https://www.bilibili.com/video/{BV}?p=2").part == 2  # type: ignore[union-attr]
 
 
-VIEW = {
+#: A `view` body with two pages; untyped on purpose, it is raw JSON from the endpoint.
+VIEW: dict = {
     "code": 0,
     "data": {
         "title": "🐱躲在超市后门哈气的二人🐱",
@@ -151,6 +152,31 @@ def test_selected_part_falls_back_to_the_first_page_only_when_none_was_chosen():
     # A part the body does not publish is ``None``, not a silent page 1.
     missing = bilibili.parse_view(VIEW, WorkRef("bilibili", "part", BV, 5))
     assert missing.selected_part is None and missing.cid is None
+
+
+def test_a_body_with_no_pages_falls_back_to_its_own_cid():
+    """Some single-part bodies publish the cid only at ``data.cid``; keep that one."""
+    body = {"code": 0, "data": {"title": "t", "cid": 111, "duration": 60}}
+    info = bilibili.parse_view(body, WorkRef("bilibili", "video", BV))
+    assert info.parts == () and info.selected_part is None
+    assert info.body_cid == 111
+    assert info.cid == 111
+    # An unusable body cid is still absent, not zero.
+    empty = bilibili.parse_view(
+        {"code": 0, "data": {"title": "t", "cid": ""}}, WorkRef("bilibili", "video", BV)
+    )
+    assert empty.body_cid is None and empty.cid is None
+
+
+def test_a_selected_part_never_falls_back_to_the_bodys_cid():
+    """``data.cid`` names part 1 (measured), so a ``?p=2`` link must not resolve to it."""
+    body = {"code": 0, "data": {**VIEW["data"], "cid": 38979504395}}
+    info = bilibili.parse_view(body, WorkRef("bilibili", "part", BV, 2))
+    assert info.body_cid is None  # a body with pages hands on no fallback at all
+    assert info.cid == 39558775483
+    # An unpublished part stays unresolved rather than becoming part 1's cid.
+    missing = bilibili.parse_view(body, WorkRef("bilibili", "part", BV, 9))
+    assert missing.cid is None
 
 
 def test_parse_view_keeps_an_unusable_cid_absent():
