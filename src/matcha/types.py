@@ -108,13 +108,25 @@ class TrackKind(StrEnum):
     THUMBNAIL = "thumbnail"
 
 
+#: Kinds no parser produces yet. They stay in the enum so consumers that already name
+#: them keep importing, but nothing guarantees a track of this kind will arrive.
+#: ``CHAPTERS`` is reserved because chapter markers arrive inline in a player body, not
+#: as a downloadable sidecar URL. ``THUMBNAIL`` is reserved because a work's cover already
+#: has exactly one home, :attr:`MediaInfo.thumbnail_url`; the kind would only name a
+#: cover *sidecar* file, which no parser describes.
+RESERVED_TRACK_KINDS: frozenset[TrackKind] = frozenset({TrackKind.CHAPTERS, TrackKind.THUMBNAIL})
+
+
 @dataclass(frozen=True, slots=True)
 class Track:
     """A sidecar the source published next to the media.
 
     ``lang`` is the source's own label (``zh-CN``, ``ai-zh``) and stays ``None`` when
     the source omitted it. ``format`` names the wire format (``json``, ``xml``,
-    ``protobuf``) so the bot can pick a converter without sniffing bytes.
+    ``protobuf``) so the bot can pick a converter without sniffing bytes. It is the
+    source's published field when there is one, and an inference otherwise: a Bilibili
+    subtitle entry that omits ``format`` is labelled ``json`` because its URL ends in
+    ``.json`` -- an inference, not a published field.
     """
 
     url: str

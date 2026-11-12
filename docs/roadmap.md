@@ -50,6 +50,10 @@ Additive changes (`Policy` fields, `Track`, `StreamPlan.tracks`,
    `Track(url, lang, format)` descriptors on `StreamPlan`. Bilibili needs
    one more request description + parser (danmaku protobuf endpoint).
    Conversion (e.g. XML/protobuf → ASS via `biliass`) stays in the bot.
+   Chapters and thumbnails shipped as vocabulary only: chapters arrive inline
+   in a player body (a future `Chapter` type, not a sidecar URL) and a cover's
+   one home is `MediaInfo.thumbnail_url`, so both kinds are reserved
+   (`RESERVED_TRACK_KINDS`) and nothing produces them.
 4. **Live conformance harness** — `conformance.live(platform)`: hit one
    known-good URL per platform, assert the parse succeeds. The early
    warning system for the extractor-drift failure class that started the
